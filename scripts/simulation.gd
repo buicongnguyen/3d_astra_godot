@@ -157,9 +157,26 @@ func cancel_queue(id: int,index: int,team: int = 0) -> bool:
 	b.queue.remove_at(index)
 	return true
 
+func construction_requirements(type: String,team: int = 0) -> String:
+	var d = Catalog.get_def(type)
+	if d.get("kind","") != "building": return "Choose a valid structure."
+	if d.has("requires") and not own(team).any(func(e): return e.type == d.requires and e.complete):
+		var prerequisite = Catalog.get_def(d.requires).name
+		var underway = own(team).any(func(e): return e.type == d.requires and not e.complete)
+		return ("Finish building %s before building %s." if underway else "Build %s before building %s.") % [prerequisite,d.name]
+	var missing = []
+	var alloy = maxi(0,ceili(d.cost[0]-players[team].alloy))
+	var energy = maxi(0,ceili(d.cost[1]-players[team].energy))
+	if alloy > 0: missing.append("%d alloy" % alloy)
+	if energy > 0: missing.append("%d energy" % energy)
+	if not missing.is_empty(): return "Need %s more to build %s. Assign Harvesters to deposits." % [" and ".join(missing),d.name]
+	return ""
+
 func placement(type: String,p: Vector2,team: int = 0) -> String:
 	var d = Catalog.get_def(type)
 	if d.get("kind","") != "building" or not p.is_finite(): return "Invalid site."
+	var missing = construction_requirements(type,team)
+	if missing != "": return missing
 	if absf(p.x) > 46-d.radius or absf(p.y) > 46-d.radius: return "Outside buildable area."
 	if nav.river and absf(p.y) < 7+d.radius: return "Keep river banks and crossing approaches clear."
 	if not seen(p,team): return "Explore the site first."
@@ -169,8 +186,6 @@ func placement(type: String,p: Vector2,team: int = 0) -> String:
 		if r.amount > 0 and p.distance_to(r.p) < d.radius+r.radius+1.5: return "Keep deposits clear."
 	for e in entities:
 		if e.hp > 0 and e.kind == "unit" and p.distance_to(e.p) < d.radius+e.radius+0.3: return "Units occupy this footprint."
-	if d.has("requires") and not own(team).any(func(e): return e.type == d.requires and e.complete): return "Requires a completed Barracks."
-	if not can_pay(team,d.cost): return "Insufficient resources."
 	return ""
 
 func build(id: int,type: String,p: Vector2,team: int = 0) -> Dictionary:

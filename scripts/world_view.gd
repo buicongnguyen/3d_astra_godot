@@ -249,7 +249,15 @@ func create_entity(e: Dictionary):
 	if animation:
 		for clip in animation.get_animation_list():
 			if clip != "Death": animation.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
-	objects[e.id] = {"root":root,"model":model,"ring":ring,"legs":legs,"animation":animation,"clip":""}
+	var boxes: Array = []
+	collect_pick_boxes(model,model,boxes)
+	objects[e.id] = {"root":root,"model":model,"ring":ring,"legs":legs,"animation":animation,"clip":"","pick_boxes":boxes}
+
+func collect_pick_boxes(node: Node,model: Node3D,boxes: Array):
+	if node is MeshInstance3D and node.mesh:
+		var local = model.global_transform.affine_inverse()*node.global_transform
+		boxes.append(local*node.get_aabb())
+	for child in node.get_children(): collect_pick_boxes(child,model,boxes)
 
 func find_animation(node: Node):
 	if node is AnimationPlayer: return node
@@ -274,16 +282,36 @@ func ground(screen: Vector2) -> Vector2:
 
 func pick(screen: Vector2) -> Dictionary:
 	var best = {}
-	var closest = 28.0
+	var closest = INF
+	var fallback = {}
+	var fallback_distance = 28.0
+	var origin = camera.project_ray_origin(screen)
+	var direction = camera.project_ray_normal(screen)
 	for e in sim.entities+sim.deposits:
 		if e.kind == "resource" and e.amount <= 0: continue
+		if e.kind != "resource" and e.hp <= 0: continue
 		if e.get("team",-1) != 0 and not sim.seen(e.p): continue
+		var transform = Transform3D(Basis.IDENTITY,Vector3(e.p.x,0,e.p.y))
+		var boxes = [AABB(Vector3(-e.radius,0,-e.radius),Vector3(e.radius*2,2.8,e.radius*2))]
+		if objects.has(e.id):
+			transform = objects[e.id].model.global_transform
+			boxes = objects[e.id].pick_boxes
+		var inverse = transform.affine_inverse()
+		for bounds in boxes:
+			# Individual visible-part bounds cover roofs and walls without one giant
+			# building box swallowing nearby units or empty spaces between props.
+			var hit = bounds.grow(0.08).intersects_ray(inverse*origin,inverse.basis*direction)
+			if hit is Vector3:
+				var depth = origin.distance_squared_to(transform*hit)
+				if depth < closest:
+					closest = depth
+					best = e
 		var pos = camera.unproject_position(Vector3(e.p.x,1.2,e.p.y))
 		var d = screen.distance_to(pos)
-		if d < closest:
-			closest = d
-			best = e
-	return best
+		if d < fallback_distance:
+			fallback_distance = d
+			fallback = e
+	return best if not best.is_empty() else fallback
 
 func refresh(dt: float):
 	update_camera()

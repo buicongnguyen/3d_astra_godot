@@ -49,8 +49,17 @@ func run():
 	check(sim.placement("relay",Vector2(0,0)) != "","crossings cannot be built over")
 	var prerequisite = first(sim,"barracks")
 	prerequisite.complete = false
-	check(sim.placement("foundry",Vector2(-13,13)) == "Requires a completed Barracks.","foundry requires a completed prerequisite")
+	check(sim.placement("foundry",Vector2(-13,13)) == "Finish building Barracks before building Foundry.","foundry names the unfinished prerequisite")
+	prerequisite.hp = 0
+	check(sim.construction_requirements("foundry") == "Build Barracks before building Foundry.","missing prerequisite names the building to construct")
+	prerequisite.hp = prerequisite.max_hp
 	prerequisite.complete = true
+	var saved = sim.players[0].duplicate()
+	sim.players[0].alloy = 20
+	sim.players[0].energy = 10
+	check(sim.construction_requirements("foundry").begins_with("Need 180 alloy and 90 energy more to build Foundry."),"construction lists exact missing resources")
+	check(sim.placement("foundry",Vector2.ZERO).begins_with("Need 180 alloy"),"requirements appear before site restrictions")
+	sim.players[0] = saved
 	var old = sim.players[0].alloy
 	var bad = sim.build(worker.id,"relay",Vector2(0,0))
 	check(bad.is_empty() and sim.players[0].alloy == old,"invalid construction has no charge")

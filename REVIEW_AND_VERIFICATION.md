@@ -53,3 +53,10 @@ Windows, RTX 4080 SUPER, Chrome 152, 1280×800, 100 friendly units, short 120-fr
 The web engine WASM is approximately 39.5 MB before HTTP compression; game data is much smaller. GitHub Pages can gzip static content. Native executable size is approximately 110 MB. Physical phone thermals, iOS audio/browser behavior, long-session soak tests and extensive competitive balance remain unverified.
 
 No blocking defect remains in the tested release flows. Three passes and automated tests do not establish that all possible bugs are eliminated.
+## Building selection and construction feedback follow-up
+
+Building selection now tests camera rays against cached model-part bounds instead of relying only on a 28-pixel center target. The nearest visible surface wins; hidden/dead entities remain excluded and the generous center fallback remains for small targets. Roof/edge selection is verified on headquarters and barracks at three zoom levels, with actual mouse/touch headquarters roof clicks in the exported browser suite.
+
+Construction requirements are checked when choosing a building and again when confirming the site. Messages name a missing or unfinished prerequisite and list exact alloy/energy shortages. Invalid confirmations explain that a site or Harvester is required; failed construction feedback remains visible until the site changes. Mobile notices have space for the full warning.
+
+Verification: 47 simulation checks pass, asset/UI regressions pass, and desktop/touch export tests pass with a real resource-shortage screenshot. Test snapshots now publish after Godot's deferred layout, and button tests wait for processed actions rather than fixed delays.

@@ -56,6 +56,8 @@ var beep: AudioStreamPlayer
 var last_key = ""
 var objective: Label
 var known_buildings: Dictionary = {}
+var build_feedback = ""
+var ui_action_serial = 0
 
 func _input(event):
 	if event is InputEventKey and event.pressed: last_key = "%d/%d shift=%s ctrl=%s" % [event.keycode,event.physical_keycode,event.shift_pressed,event.ctrl_pressed]
@@ -150,7 +152,10 @@ func button(text: String,callback: Callable) -> Button:
 	b.text = text
 	b.custom_minimum_size = Vector2(0,40)
 	b.add_theme_font_size_override("font_size",14)
-	b.pressed.connect(callback)
+	b.pressed.connect(func():
+		callback.call()
+		ui_action_serial += 1
+	)
 	return b
 
 func make_ui():
@@ -253,8 +258,8 @@ func layout():
 	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	action_scroll.position = Vector2(12,76 if narrow else 63)
 	action_scroll.size = Vector2(bottom.size.x-24,height-action_scroll.position.y-10)
-	notice.position = Vector2(16,bottom.position.y-44)
-	notice.size = Vector2(size.x-32,40)
+	notice.position = Vector2(16,bottom.position.y-70)
+	notice.size = Vector2(size.x-32,64)
 	var minimap_size = 100 if narrow else 154
 	minimap_rect = Rect2(size.x-minimap_size-18,header.position.y+header.size.y+12,minimap_size,minimap_size)
 	objective.position = Vector2(18,header.position.y+header.size.y+12)
@@ -307,6 +312,7 @@ func reset_sim(river: bool):
 	known_buildings.clear()
 	mode = ""
 	placement_ready = false
+	build_feedback = ""
 	pointer_down = false
 	touches.clear()
 	accumulator = 0
@@ -421,6 +427,7 @@ func click_world(point: Vector2,touch: bool = false):
 		return
 	if mode == "build":
 		placement_point = view.ground(point)
+		build_feedback = ""
 		placement_ready = true
 		if not touch: confirm_build()
 		return
@@ -437,8 +444,23 @@ func click_world(point: Vector2,touch: bool = false):
 	else: selected.clear()
 	action_signature = ""
 
+func begin_build(type: String):
+	var missing = sim.construction_requirements(type)
+	if missing != "":
+		sim.feedback(missing,0)
+		mode = ""
+		view.ghost.visible = false
+	else:
+		building_type = type
+		mode = "build"
+	placement_ready = false
+	build_feedback = ""
+	refresh_ui()
+
 func confirm_build():
-	if not placement_ready: return
+	if not placement_ready:
+		build_feedback = "Choose a construction site on the ground first."
+		return
 	for id in selected:
 		var w = sim.entity(id)
 		if not w.is_empty() and w.type == "worker":
@@ -448,7 +470,9 @@ func confirm_build():
 				placement_ready = false
 				view.ghost.visible = false
 				acknowledge()
+			else: build_feedback = sim.message
 			return
+	build_feedback = "Select a Harvester to construct this building."
 
 func _unhandled_input(event):
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
@@ -497,7 +521,9 @@ func _unhandled_input(event):
 		pointer_now = event.position
 		if pointer_down and pointer_now.distance_to(pointer_start) > 7: dragging = true
 		if middle_down: view.focus += view.ground(event.position-event.relative)-view.ground(event.position)
-		if mode == "build": placement_point = view.ground(event.position)
+		if mode == "build":
+			placement_point = view.ground(event.position)
+			build_feedback = ""
 	if event is InputEventScreenTouch:
 		touch_active = true
 		if event.pressed:
@@ -544,7 +570,11 @@ func refresh_ui():
 		if not e.complete: info_label.text += " · Building %d%%" % (e.progress*100)
 		if not e.queue.is_empty(): info_label.text += " · %s %d%% %s" % [Catalog.get_def(e.queue[0].type).name,mini(100,int(e.queue[0].elapsed/Catalog.get_def(e.queue[0].type).time*100)),e.queue[0].blocked]
 		signature += str(e.complete)+str(e.queue.map(func(q): return q.type))
-	notice.text = "Place %s: tap ground, then Confirm. %s" % [building_type,sim.placement(building_type,placement_point)] if mode == "build" else ("Attack-move: choose a destination." if mode == "attack" else sim.message)
+	if mode == "build":
+		var error = sim.placement(building_type,placement_point) if placement_ready or not touch_active else ""
+		notice.text = build_feedback if build_feedback != "" else (error if error != "" else "Place %s: %s" % [Catalog.get_def(building_type).name,"tap ground, then Confirm site." if touch_active else "click a valid site to build."])
+	else: notice.text = "Attack-move: choose a destination." if mode == "attack" else sim.message
+	notice.add_theme_color_override("font_color",Color("ffd58a") if mode == "build" or sim.message.begins_with("Need ") or sim.message.begins_with("Build ") or sim.message.begins_with("Finish ") else Color("e1ebe2"))
 	if signature == action_signature: return
 	action_signature = signature
 	clear_children(actions)
@@ -569,7 +599,7 @@ func refresh_ui():
 		if entities.any(func(u): return u.type == "worker"):
 			for type in ["relay","barracks","foundry","tower","hq"]:
 				var d = Catalog.get_def(type)
-				actions.add_child(button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): building_type = type; mode = "build"; placement_ready = false))
+				actions.add_child(button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type)))
 		else:
 			actions.add_child(button("Move",func(): mode = "move"))
 			actions.add_child(button("Attack-move",func(): mode = "attack"))
@@ -596,7 +626,7 @@ func _process(dt):
 	if ui_clock <= 0:
 		refresh_ui()
 		overlay.queue_redraw()
-		if test_enabled: publish_state()
+		if test_enabled: publish_state.call_deferred()
 		ui_clock = 0.1
 	if sim.result != "" and not paused:
 		paused = true
@@ -637,7 +667,7 @@ func test_call(args):
 			view.zoom = 55
 	refresh_ui()
 	view.refresh(0)
-	publish_state()
+	publish_state.call_deferred()
 
 func publish_state():
 	var list = []
@@ -649,6 +679,12 @@ func publish_state():
 	var state = {"ready":true,"started":started,"paused":paused,"result":sim.result,"time":sim.time,"selected":selected,"population":sim.population(0),"alloy":sim.players[0].alloy,"energy":sim.players[0].energy,"entities":list,"buttons":buttons,"settings":settings,"settings_open":is_instance_valid(settings_panel),"models":view.objects.size(),"focus":[view.focus.x,view.focus.y],"zoom":view.zoom,"mode":mode,"viewport":[ui.size.x,ui.size.y]}
 	state.last_key = last_key
 	state.groups = groups
+	state.notice = notice.text
+	state.ui_action_serial = ui_action_serial
+	state.building_probes = sim.own(0).filter(func(e): return e.kind == "building").map(func(e):
+		var point = view.camera.unproject_position(Vector3(e.p.x+minf(2,e.radius*0.7),2.6,e.p.y))
+		return {"id":e.id,"screen":[point.x,point.y]}
+	)
 	state.draw_calls = Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
 	state.render_objects = Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
 	state.nodes = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)

@@ -14,10 +14,11 @@ for(const mobile of [false,true]){
  const cmd=async o=>{await page.evaluate(o=>window.frontierCommand(JSON.stringify(o)),o);await page.waitForTimeout(120);};
  const press=async text=>{
    await page.waitForFunction(t=>window.frontierState?.buttons.some(b=>b.text===t),text);
-   const b=(await state()).buttons.find(b=>b.text===text);assert(b,`button ${text}`);
+   const snapshot=await state();const serial=snapshot.ui_action_serial;
+   const b=snapshot.buttons.find(b=>b.text===text);assert(b,`button ${text}`);
    const p={x:b.x+b.w/2,y:b.y+b.h/2};
    if(mobile)await page.touchscreen.tap(p.x,p.y);else await page.mouse.click(p.x,p.y);
-   await page.waitForTimeout(180);
+   await page.waitForFunction(serial=>window.frontierState.ui_action_serial>serial,serial);
  };
  try {
  await page.goto(url+'?test=1');
@@ -36,10 +37,22 @@ for(const mobile of [false,true]){
  await page.waitForTimeout(150);assert.equal((await state()).entities.find(e=>e.id===worker.id).orders[0],'gather');
  const before=(await state()).alloy;await cmd({action:'step',seconds:45});assert.ok((await state()).alloy>before);
  const hq=(await state()).entities.find(e=>e.type==='hq'&&e.team===0);
- await cmd({action:'select',ids:[hq.id]});
+ const roof=(await state()).building_probes.find(b=>b.id===hq.id).screen;
+ if(mobile)await page.touchscreen.tap(...roof);else await page.mouse.click(...roof);
+ await page.waitForFunction(id=>window.frontierState.selected.length===1&&window.frontierState.selected[0]===id,hq.id);
  await press('Harvester · 50/0');assert.equal((await state()).population.reserved,1);
  await press('Cancel #1');assert.equal((await state()).population.reserved,0);
  await press('Harvester · 50/0');await cmd({action:'step',seconds:9});assert.equal((await state()).population.used,8);
+ const production=(await state()).entities.find(e=>e.type==='barracks'&&e.team===0);
+ await cmd({action:'select',ids:[production.id]});
+ for(let i=0;i<3;i++)await press('Ranger · 100/25');
+ await cmd({action:'select',ids:[worker.id]});
+ await press('Foundry 200/100');
+ await page.waitForFunction(()=>window.frontierState.notice.includes('25 energy more to build Foundry'));
+ assert.equal((await state()).mode,'');
+ await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-construction-feedback.png`});
+ await cmd({action:'select',ids:[production.id]});
+ for(let i=0;i<3;i++)await press('Cancel #1');
  await press('Pause');let time=(await state()).time;
  await page.waitForTimeout(300);assert.equal((await state()).time,time);
  await press('Army & graphics settings');await press('Cancel');assert.equal((await state()).paused,true);

@@ -49,6 +49,35 @@ func run():
 	verify(not game.known_buildings.has(enemy_hq.id),"revisiting an empty site clears its marker")
 	game.restart_match()
 	game.view.refresh(0)
+	# Model-surface clicks well outside the previous center-only hit circle.
+	for type in ["hq","barracks"]:
+		var building = game.sim.own(0).filter(func(e): return e.type == type)[0]
+		for zoom in [20,44,80]:
+			game.view.zoom = zoom
+			game.view.focus = building.p
+			game.view.update_camera()
+			var roof = Vector3(building.p.x+(2.0 if type == "hq" else 1.7),2.6,building.p.y)
+			var hit = game.view.pick(game.view.camera.unproject_position(roof))
+			verify(hit.get("id",-1) == building.id,"roof/edge selection: %s at zoom %d" % [type,zoom])
+	var friendly_worker = game.sim.own(0).filter(func(e): return e.type == "worker")[0]
+	var barracks = game.sim.own(0).filter(func(e): return e.type == "barracks")[0]
+	game.selected = [friendly_worker.id]
+	barracks.hp = 0
+	game.begin_build("foundry")
+	verify(game.mode == "" and game.notice.text == "Build Barracks before building Foundry.","missing prerequisite is shown immediately without placement mode")
+	barracks.hp = barracks.max_hp
+	game.sim.players[0].alloy = 20
+	game.sim.players[0].energy = 10
+	game.begin_build("foundry")
+	verify(game.mode == "" and game.notice.text.begins_with("Need 180 alloy and 90 energy"),"UI shows exact construction resource shortage")
+	game.sim.players[0].alloy = 450
+	game.sim.players[0].energy = 150
+	game.begin_build("relay")
+	game.confirm_build()
+	game.refresh_ui()
+	verify(game.notice.text == "Choose a construction site on the ground first.","confirm without a site explains the required action")
+	game.restart_match()
+	game.view.refresh(0)
 	await process_frame
 	var before = game.view.get_child_count()
 	for i in range(5):
