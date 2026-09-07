@@ -1,0 +1,1 @@
+{"name":"frontier-command-godot","private":true,"type":"module","scripts":{"serve":"node tools/serve.mjs","test:browser":"node tests/browser.mjs"},"devDependencies":{"playwright":"1.58.2"}}

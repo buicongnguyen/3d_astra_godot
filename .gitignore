@@ -1,0 +1,7 @@
+.godot/
+.tools/
+build/
+node_modules/
+test-results/
+*.blend1
+*.log
