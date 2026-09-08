@@ -13,7 +13,9 @@
 
 ## Verification
 
-`npm run test:browser` covers desktop controls, construction feedback, progression, Medic support, pause/settings, gestures and restarts. Its DPR 3 mobile matrix checks 320×568, 390×844, 667×375, 844×390 and 768×1024, enumerates action pages and asserts that every visible action fits both the command area and viewport. It uses raw touch coordinates; hidden controls are never automatically scrolled into reach. DPR 1 desktop and earlier phone checks also passed. Screenshots were visually inspected after rotation. This runs before Pages deployment.
+`npm run test:browser` covers desktop controls, construction feedback, progression, Medic support, pause/settings, gestures and restarts. Its mobile matrix checks 320×568, 390×844, 667×375, 844×390 and 768×1024, enumerates action pages and asserts that every visible action fits both the command area and viewport. It uses raw touch coordinates; hidden controls are never automatically scrolled into reach. The complete matrix passed locally at DPR 3, and screenshots were visually inspected after rotation.
+
+CI runs the complete suite with `MOBILE_DPR=1`, followed by `npm run test:mobile-density`, which verifies DPR 3 Android Chrome portrait/landscape scaling, actual touch actions, paging, the field guide and modal footers. Running the entire large-screen matrix at DPR 3 exceeded the software-renderer job's 25-minute limit; splitting these checks retains the gameplay/layout coverage and explicitly checks the high-density regression. Local `npm run test:browser` still defaults to DPR 3.
 
 Native checks passed: 47 simulation checks, 37 progression checks, and the asset/UI suite. Added asset checks confirm fewer mesh nodes, unchanged triangle counts, valid animation targets and existing roof/edge picking. Web and Windows exports were validated. Review also covered action-page rebuilding, portrait/landscape transitions, modal footers and scene cleanup on restart.
 

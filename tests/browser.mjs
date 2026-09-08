@@ -7,7 +7,8 @@ const browser=await chromium.launch({headless:true,executablePath:process.platfo
 const reports=[];
 try {
 for(const mobile of [false,true]){
- const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1280,height:800},hasTouch:mobile,isMobile:mobile,deviceScaleFactor:mobile?3:1});
+ console.log(`Starting ${mobile?'mobile':'desktop'} gameplay checks; mobile DPR ${process.env.MOBILE_DPR||3}`);
+ const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1280,height:800},hasTouch:mobile,isMobile:mobile,deviceScaleFactor:mobile?Number(process.env.MOBILE_DPR||3):1});
  const page=await context.newPage();const errors=[];
  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('response',r=>{if(r.status()>=400)errors.push(`${r.status()} ${r.url()}`);});
  const state=()=>page.evaluate(()=>window.frontierState);
@@ -35,7 +36,7 @@ for(const mobile of [false,true]){
  try {
  await page.goto(url+'?test=1');
  await page.waitForFunction(()=>window.frontierState?.ready,null,{timeout:90000});
- if(mobile)assert.deepEqual((await state()).viewport,[390,844],'DPR 3 HUD uses logical phone pixels');
+ if(mobile)assert.deepEqual((await state()).viewport,[390,844],'HUD uses logical phone pixels');
  assert.equal((await state()).models,18);
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-briefing.png`});
  // Intro stays paused; its footer controls remain fixed on short displays.
@@ -68,6 +69,7 @@ for(const mobile of [false,true]){
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-construction-feedback.png`});
  await cmd({action:'select',ids:[production.id]});
  for(let i=0;i<3;i++)await press('Cancel #1');
+ console.log(`Production controls passed (${mobile?'mobile':'desktop'})`);
  await cmd({action:'start'}); // exercise real-time pause behavior independently of deterministic production checks
  const runningTime=(await state()).time;
  await page.waitForFunction(t=>window.frontierState.time>t,runningTime);
@@ -126,6 +128,7 @@ for(const mobile of [false,true]){
  await cmd({action:'select',ids:[hq.id]});
  await press('Upgrade L3 · 350/175');await cmd({action:'step',seconds:31});assert.equal((await state()).tech_level,3);
  if(mobile){
+   console.log('Progression passed; checking viewport matrix');
    // Inspect actual canvas coordinates without auto-scrolling hidden controls into view.
    for(const viewport of [{width:320,height:568},{width:390,height:844},{width:667,height:375},{width:844,height:390},{width:768,height:1024}]){
      await page.setViewportSize(viewport);await page.waitForTimeout(350);
@@ -152,6 +155,7 @@ for(const mobile of [false,true]){
      for(const text of ['Apply settings','Cancel'])fits((await state()).buttons.find(b=>b.text===text));
      await press('Cancel');await press('Resume');
      await page.screenshot({path:`test-results/mobile-controls-${viewport.width}x${viewport.height}.png`});
+     console.log(`Visible controls passed: ${viewport.width}x${viewport.height}`);
    }
    await page.setViewportSize({width:390,height:844});await page.waitForTimeout(350);
  }
