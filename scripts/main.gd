@@ -60,6 +60,8 @@ var build_feedback = ""
 var ui_action_serial = 0
 var action_pager: HBoxContainer
 var action_page = 0
+var action_context = ""
+var test_manual_clock = false
 var action_pages = 1
 var mobile_layout = false
 var touch_device = false
@@ -370,6 +372,7 @@ func start_match():
 	acknowledge()
 
 func reset_sim(river: bool):
+	test_manual_clock = false
 	sim = Simulation.new(true,river)
 	view.sim = sim
 	view.build_map()
@@ -748,7 +751,9 @@ func refresh_ui():
 	notice.add_theme_color_override("font_color",Color("ffd58a") if mode == "build" or sim.message.begins_with("Need ") or sim.message.begins_with("Build ") or sim.message.begins_with("Finish ") else Color("e1ebe2"))
 	if signature == action_signature: return
 	action_signature = signature
-	action_page = 0
+	var context = str(selected)+"|"+mode
+	if action_context != context: action_page = 0
+	action_context = context
 	clear_children(actions)
 	arrange_actions.call_deferred()
 	if mode == "build":
@@ -789,10 +794,11 @@ func refresh_ui():
 func _process(dt):
 	if not sim: return
 	if not paused and started and sim.result == "":
-		accumulator += minf(dt,0.2)
-		while accumulator >= 0.05:
-			sim.tick(0.05)
-			accumulator -= 0.05
+		if not (test_enabled and test_manual_clock):
+			accumulator += minf(dt,0.2)
+			while accumulator >= 0.05:
+				sim.tick(0.05)
+				accumulator -= 0.05
 		var pan = Vector2(float(Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT))-float(Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)),float(Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN))-float(Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)))
 		view.focus += pan*view.zoom*0.65*dt
 	view.selected = selected
@@ -823,7 +829,11 @@ func test_call(args):
 	var command = JSON.parse_string(str(args[0]))
 	if not command is Dictionary: return
 	match command.get("action",""):
-		"start": start_match(); sim.ai_enabled = false
+		"start":
+			start_match()
+			sim.ai_enabled = false
+			test_manual_clock = command.get("manual_clock",false) == true
+			accumulator = 0
 		"step":
 			for i in range(mini(12000,int(command.get("seconds",1)*20))): sim.tick(0.05)
 		"select": selected = command.ids

@@ -4,6 +4,7 @@
 
 - Web controls use the canvas's CSS dimensions as Godot's logical viewport. DPR 3 phones receive the mobile layout and 44-CSS-pixel buttons instead of tiny desktop controls. Resize handling is deferred until the engine finishes resizing, preserving correct rendering after rotation.
 - Main actions use explicit Previous / More actions pages: two full-width actions in portrait and four in landscape.
+- Queue changes preserve the current action page; changing selection or order mode returns to the first page.
 - A right-hand command panel keeps landscape controls apart from the minimap, notices and navigation.
 - Touch tablets use the mobile layout. Rotating or narrowing the viewport releases the previous control widths.
 - Deploy, Resume, Settings and result actions use fixed modal footers. Text remains scrollable.
@@ -17,6 +18,8 @@
 Native checks passed: 47 simulation checks, 37 progression checks, and the asset/UI suite. Added asset checks confirm fewer mesh nodes, unchanged triangle counts, valid animation targets and existing roof/edge picking. Web and Windows exports were validated. Review also covered action-page rebuilding, portrait/landscape transitions, modal footers and scene cleanup on restart.
 
 ## Performance sample
+
+Production UI tests explicitly advance the test-only simulation clock so a slow software renderer cannot finish queues while the test navigates buttons. Separate checks enable real time and verify both pause and resume. Normal play and performance benchmarks retain the real-time clock.
 
 Chrome 152, RTX 4080 SUPER desktop GPU, 390×844 viewport, DPR 3, Eco mode, 4× CPU throttling. 129 animation-frame intervals after warm-up; AI disabled and stationary friendly units. This is a desktop proxy, not a physical phone or sustained-battle benchmark.
 

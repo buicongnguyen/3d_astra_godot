@@ -43,7 +43,8 @@ for(const mobile of [false,true]){
  await press('High contrast: Gold / Violet');
  await press('Apply settings');assert.equal((await state()).settings.player,3);assert.equal((await state()).started,false);
  await press('Deploy expedition');assert.equal((await state()).started,true);
- await cmd({action:'start'}); // deterministic UI checks, AI remains covered in GDScript matches
+ await page.waitForFunction(()=>window.frontierState.time>0); // normal matches advance in real time
+ await cmd({action:'start',manual_clock:true}); // UI checks advance time explicitly, independent of software-renderer speed
  let s=await state();const worker=s.entities.find(e=>e.type==='worker'&&e.team===0);const deposit=s.entities.find(e=>e.type==='alloy');
  await cmd({action:'select',ids:[worker.id]});
  if(mobile)await page.touchscreen.tap(...deposit.screen);else await page.mouse.click(...deposit.screen,{button:'right'});
@@ -55,6 +56,7 @@ for(const mobile of [false,true]){
  await page.waitForFunction(id=>window.frontierState.selected.length===1&&window.frontierState.selected[0]===id,hq.id);
  await press('Harvester · 50/0');assert.equal((await state()).population.reserved,1);
  await press('Cancel #1');assert.equal((await state()).population.reserved,0);
+ if(mobile)assert.equal((await state()).action_page,1,'queue changes preserve the current action page');
  await press('Harvester · 50/0');await cmd({action:'step',seconds:9});assert.equal((await state()).population.used,8);
  const production=(await state()).entities.find(e=>e.type==='barracks'&&e.team===0);
  await cmd({action:'select',ids:[production.id]});
@@ -66,10 +68,15 @@ for(const mobile of [false,true]){
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-construction-feedback.png`});
  await cmd({action:'select',ids:[production.id]});
  for(let i=0;i<3;i++)await press('Cancel #1');
+ await cmd({action:'start'}); // exercise real-time pause behavior independently of deterministic production checks
+ const runningTime=(await state()).time;
+ await page.waitForFunction(t=>window.frontierState.time>t,runningTime);
  await press('Pause');let time=(await state()).time;
  await page.waitForTimeout(300);assert.equal((await state()).time,time);
  await press('Army & graphics settings');await press('Cancel');assert.equal((await state()).paused,true);
  await press('Resume');assert.equal((await state()).paused,false);
+ await page.waitForFunction(t=>window.frontierState.time>t,time);
+ await cmd({action:'start',manual_clock:true});
  if(!mobile){
    const army=(await state()).entities.filter(e=>e.team===0&&['ranger','vanguard'].includes(e.type)).map(e=>e.id);
    await cmd({action:'select',ids:army});
