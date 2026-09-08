@@ -23,9 +23,28 @@ var selection_box = Rect2()
 
 func setup(simulation):
 	sim = simulation
+	var templates = Node3D.new()
+	templates.name = "ModelTemplates"
+	templates.visible = false
+	add_child(templates)
 	for type in Catalog.definitions:
 		if type == "upgrade": continue
-		models[type] = load("res://assets/models/"+type+".glb")
+		var model = load("res://assets/models/"+type+".glb").instantiate()
+		templates.add_child(model)
+		var boxes: Array = []
+		collect_pick_boxes(model,model,boxes)
+		model.set_meta("pick_boxes",boxes)
+		var animated: Array = []
+		var player = find_animation(model)
+		if player:
+			var animation_root = player.get_node(player.root_node)
+			for clip in player.get_animation_list():
+				var animation = player.get_animation(clip)
+				for track in range(animation.get_track_count()):
+					var target = animation_root.get_node_or_null(NodePath(str(animation.track_get_path(track)).get_slice(":",0)))
+					if target: animated.append(target)
+		batch_static_parts(model,animated)
+		models[type] = model
 	var environment = WorldEnvironment.new()
 	var env = Environment.new()
 	env.background_mode = Environment.BG_COLOR
@@ -60,6 +79,32 @@ func setup(simulation):
 	ghost.material_override = material(Color(0.3,1,0.6,0.45),true)
 	ghost.visible = false
 	add_child(ghost)
+
+func batch_static_parts(parent: Node,animated: Array):
+	# Merge only static siblings sharing a material. Animated transforms remain intact.
+	for child in parent.get_children(): batch_static_parts(child,animated)
+	var groups: Dictionary = {}
+	var sources: Array = []
+	for child in parent.get_children():
+		if not child is MeshInstance3D or not child.mesh or child.skin or animated.has(child) or child.get_child_count() > 0: continue
+		if child.mesh.get_blend_shape_count() > 0: continue
+		sources.append(child)
+		for surface in range(child.mesh.get_surface_count()):
+			var mat = child.get_active_material(surface)
+			if not groups.has(mat): groups[mat] = []
+			groups[mat].append({"mesh":child.mesh,"surface":surface,"transform":child.transform})
+	if sources.size() <= groups.size(): return
+	for mat in groups:
+		var tool = SurfaceTool.new()
+		tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+		for part in groups[mat]: tool.append_from(part.mesh,part.surface,part.transform)
+		tool.set_material(mat)
+		var merged = MeshInstance3D.new()
+		merged.mesh = tool.commit()
+		parent.add_child(merged)
+	for source in sources:
+		parent.remove_child(source)
+		source.free()
 
 func material(color: Color,unshaded: bool = false) -> StandardMaterial3D:
 	var m = StandardMaterial3D.new()
@@ -231,7 +276,8 @@ func set_colors(player: Color,opponent: Color):
 func create_entity(e: Dictionary):
 	var root = Node3D.new()
 	add_child(root)
-	var model = models[e.type].instantiate()
+	# Exclude DUPLICATE_USE_INSTANTIATION so the imported scene cannot restore unbatched meshes.
+	var model = models[e.type].duplicate(Node.DUPLICATE_SIGNALS | Node.DUPLICATE_GROUPS | Node.DUPLICATE_SCRIPTS)
 	root.add_child(model)
 	var legs = []
 	paint(model,e.team,legs)
@@ -259,7 +305,7 @@ func create_entity(e: Dictionary):
 		for clip in animation.get_animation_list():
 			if clip != "Death": animation.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	var boxes: Array = []
-	collect_pick_boxes(model,model,boxes)
+	boxes = model.get_meta("pick_boxes",[])
 	objects[e.id] = {"root":root,"model":model,"ring":ring,"legs":legs,"animation":animation,"clip":"","pick_boxes":boxes}
 
 func collect_pick_boxes(node: Node,model: Node3D,boxes: Array):

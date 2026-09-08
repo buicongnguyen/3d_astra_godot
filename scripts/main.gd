@@ -58,6 +58,12 @@ var objective: Label
 var known_buildings: Dictionary = {}
 var build_feedback = ""
 var ui_action_serial = 0
+var action_pager: HBoxContainer
+var action_page = 0
+var action_pages = 1
+var mobile_layout = false
+var touch_device = false
+var landscape_layout = false
 var guide_panel: Panel
 var guide_was_paused = true
 
@@ -76,7 +82,10 @@ func _notification(what):
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and started and not paused: toggle_pause()
 
 func _ready():
-	settings.eco = bool(JavaScriptBridge.eval("matchMedia('(pointer: coarse)').matches")) if OS.has_feature("web") else DisplayServer.is_touchscreen_available()
+	if OS.has_feature("web"):
+		get_window().content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	touch_device = bool(JavaScriptBridge.eval("matchMedia('(pointer: coarse)').matches")) if OS.has_feature("web") else DisplayServer.is_touchscreen_available()
+	settings.eco = touch_device
 	load_settings()
 	sim = Simulation.new()
 	view = WorldView.new()
@@ -86,7 +95,8 @@ func _ready():
 	make_audio()
 	apply_settings()
 	show_briefing()
-	get_viewport().size_changed.connect(layout)
+	# Finish the engine's resize before changing its logical content size.
+	get_viewport().size_changed.connect(layout,CONNECT_DEFERRED)
 	layout()
 	if OS.has_feature("web"):
 		test_enabled = bool(JavaScriptBridge.eval("new URLSearchParams(location.search).get('test') === '1'"))
@@ -152,7 +162,7 @@ func label(text: String,font_size: int = 15) -> Label:
 func button(text: String,callback: Callable) -> Button:
 	var b = Button.new()
 	b.text = text
-	b.custom_minimum_size = Vector2(0,40)
+	b.custom_minimum_size = Vector2(0,44)
 	b.add_theme_font_size_override("font_size",14)
 	b.pressed.connect(func():
 		callback.call()
@@ -197,10 +207,20 @@ func make_ui():
 	actions.add_theme_constant_override("h_separation",6)
 	actions.add_theme_constant_override("v_separation",6)
 	action_scroll = ScrollContainer.new()
-	action_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# SHOW_NEVER avoids propagating the previous page's minimum width on rotation.
+	action_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER
 	bottom.add_child(action_scroll)
 	actions.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	action_scroll.add_child(actions)
+	action_pager = HBoxContainer.new()
+	action_pager.add_theme_constant_override("separation",6)
+	bottom.add_child(action_pager)
+	action_pager.add_child(button("Previous",func(): action_page -= 1; arrange_actions()))
+	var page_label = label("",13)
+	page_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	page_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	action_pager.add_child(page_label)
+	action_pager.add_child(button("More actions",func(): action_page += 1; arrange_actions()))
 	notice = label("",14)
 	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	ui.add_child(notice)
@@ -236,23 +256,37 @@ func make_ui():
 	scenario.custom_minimum_size.y = 40
 	modal_body.add_child(scenario)
 	modal_actions = VBoxContainer.new()
-	modal_body.add_child(modal_actions)
+	modal.add_child(modal_actions)
 	refresh_ui()
 
 func layout():
 	if not ui: return
+	if OS.has_feature("web"):
+		# Browser touch coordinates and CSS layout use logical pixels, not DPR-scaled canvas pixels.
+		var css_size = Vector2i(int(JavaScriptBridge.eval("document.getElementById('canvas').clientWidth")),int(JavaScriptBridge.eval("document.getElementById('canvas').clientHeight")))
+		if css_size.x > 0 and css_size.y > 0 and get_window().content_scale_size != css_size:
+			get_window().content_scale_size = css_size
+			layout.call_deferred()
+			return
 	var size = get_viewport().get_visible_rect().size
-	var narrow = size.x < 540
+	mobile_layout = size.x < 540 or (size.x < 960 and size.y < 540) or (touch_device and size.x < 1100)
+	landscape_layout = mobile_layout and size.x > size.y
+	var narrow = mobile_layout
+	var field_width = size.x-300 if landscape_layout else size.x
 	header.position = Vector2(10,10)
-	header.size = Vector2(size.x-20,98 if narrow else 68)
+	header.size = Vector2(field_width-20,98 if narrow else 68)
 	title_label.position = Vector2(12,9)
 	title_label.add_theme_font_size_override("font_size",16 if narrow else 20)
 	resource_label.position = Vector2(12,35 if narrow else 36)
-	resource_label.add_theme_font_size_override("font_size",13 if narrow else 15)
+	resource_label.add_theme_font_size_override("font_size",11 if size.x < 360 or landscape_layout else (13 if narrow else 15))
 	nav_buttons.position = Vector2(12,57) if narrow else Vector2(size.x-260,12)
 	var height = 235 if narrow else (145 if size.y < 520 else 170)
 	bottom.position = Vector2(10,size.y-height-10)
 	bottom.size = Vector2(size.x-20,height)
+	if landscape_layout:
+		bottom.position = Vector2(size.x-290,10)
+		bottom.size = Vector2(280,size.y-20)
+		height = bottom.size.y
 	selection_label.position = Vector2(12,10)
 	selection_label.add_theme_font_size_override("font_size",15 if narrow else 18)
 	info_label.position = Vector2(12,36)
@@ -260,16 +294,24 @@ func layout():
 	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	action_scroll.position = Vector2(12,76 if narrow else 63)
 	action_scroll.size = Vector2(bottom.size.x-24,height-action_scroll.position.y-10)
+	action_pager.position = Vector2(12,height-54)
+	action_pager.size = Vector2(bottom.size.x-24,44)
+	if mobile_layout: action_scroll.size.y = action_pager.position.y-action_scroll.position.y-8
+	arrange_actions.call_deferred()
 	notice.position = Vector2(16,bottom.position.y-70)
-	notice.size = Vector2(size.x-32,64)
+	notice.size = Vector2(field_width-32,64)
+	if landscape_layout: notice.position = Vector2(16,size.y-72)
 	var minimap_size = 100 if narrow else 154
-	minimap_rect = Rect2(size.x-minimap_size-18,header.position.y+header.size.y+12,minimap_size,minimap_size)
+	minimap_rect = Rect2(field_width-minimap_size-18,header.position.y+header.size.y+12,minimap_size,minimap_size)
 	objective.position = Vector2(18,header.position.y+header.size.y+12)
-	objective.size = Vector2(maxf(120,size.x-minimap_size-60),55)
+	objective.size = Vector2(maxf(100,field_width-minimap_size-60),55)
 	modal.size = Vector2(minf(490,size.x-30),minf(490,size.y-30))
 	modal.position = (size-modal.size)*0.5
 	modal_scroll.position = Vector2(24,22)
-	modal_scroll.size = modal.size-Vector2(48,44)
+	var footer_height = modal_actions.get_child_count()*44+maxi(0,modal_actions.get_child_count()-1)*4
+	modal_scroll.size = modal.size-Vector2(48,footer_height+58)
+	modal_actions.position = Vector2(24,modal.size.y-footer_height-22)
+	modal_actions.size = Vector2(modal.size.x-48,footer_height)
 	if is_instance_valid(settings_panel):
 		settings_panel.size = Vector2(minf(470,size.x-24),minf(560,size.y-24))
 		settings_panel.position = (size-settings_panel.size)*0.5
@@ -283,7 +325,25 @@ func layout():
 		guide_panel.get_child(1).position = Vector2(16,guide_panel.size.y-54)
 		guide_panel.get_child(1).size = Vector2(guide_panel.size.x-32,40)
 
+func arrange_actions():
+	if not is_instance_valid(action_pager): return
+	var count = actions.get_child_count()
+	var per_page = 4 if landscape_layout else 2
+	action_pages = maxi(1,ceili(float(count)/per_page)) if mobile_layout else 1
+	action_page = clampi(action_page,0,action_pages-1)
+	action_pager.visible = mobile_layout and count > 0
+	action_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_SHOW_NEVER if mobile_layout else ScrollContainer.SCROLL_MODE_AUTO
+	for i in range(count):
+		var child = actions.get_child(i)
+		child.visible = not mobile_layout or i/per_page == action_page
+		child.custom_minimum_size.x = action_scroll.size.x-2 if mobile_layout else 0
+	action_pager.get_child(0).disabled = action_page == 0
+	action_pager.get_child(1).text = "%d / %d" % [action_page+1,action_pages]
+	action_pager.get_child(2).disabled = action_page == action_pages-1
+	if test_enabled: publish_state.call_deferred()
+
 func clear_children(node: Node):
+	if node == modal_actions: layout.call_deferred()
 	for child in node.get_children():
 		node.remove_child(child)
 		child.queue_free()
@@ -380,7 +440,7 @@ func show_settings():
 		var toggle = CheckButton.new()
 		toggle.text = {"eco":"Eco graphics (disable shadows)","water":"Animate water","detail":"Show decorative vegetation","muted":"Mute command sounds"}[key]
 		toggle.button_pressed = settings[key]
-		toggle.custom_minimum_size.y = 36
+		toggle.custom_minimum_size.y = 44
 		body.add_child(toggle)
 		toggles[key] = toggle
 	var error = label("",13)
@@ -688,7 +748,9 @@ func refresh_ui():
 	notice.add_theme_color_override("font_color",Color("ffd58a") if mode == "build" or sim.message.begins_with("Need ") or sim.message.begins_with("Build ") or sim.message.begins_with("Finish ") else Color("e1ebe2"))
 	if signature == action_signature: return
 	action_signature = signature
+	action_page = 0
 	clear_children(actions)
+	arrange_actions.call_deferred()
 	if mode == "build":
 		actions.add_child(button("Confirm site",confirm_build))
 		actions.add_child(button("Cancel",func(): mode = ""; placement_ready = false; view.ghost.visible = false))
@@ -809,6 +871,11 @@ func publish_state():
 	state.selection_info = info_label.text
 	state.guide_open = is_instance_valid(guide_panel)
 	state.tech_level = sim.tech_level(0)
+	state.mobile_layout = mobile_layout
+	state.action_page = action_page
+	state.action_pages = action_pages
+	state.action_buttons = []
+	collect_buttons(actions,state.action_buttons)
 	state.action_rect = [action_scroll.global_position.x,action_scroll.global_position.y,action_scroll.size.x,action_scroll.size.y]
 	state.ui_action_serial = ui_action_serial
 	state.building_probes = sim.own(0).filter(func(e): return e.kind == "building").map(func(e):
@@ -823,5 +890,5 @@ func publish_state():
 func collect_buttons(node: Node,list: Array):
 	if node is Button and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
-		list.append({"text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y})
+		list.append({"text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
 	for child in node.get_children(): collect_buttons(child,list)

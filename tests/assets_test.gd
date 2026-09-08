@@ -26,6 +26,29 @@ func run():
 	var game = Main.instantiate()
 	root.add_child(game)
 	await process_frame
+	# Optimized templates retain vertices and valid animation targets while reducing mesh nodes.
+	for type in ["worker","ranger","hq","barracks"]:
+		var original = load("res://assets/models/"+type+".glb").instantiate()
+		var optimized = game.view.models[type]
+		var source_meshes = original.find_children("*","MeshInstance3D",true,false)
+		var merged_meshes = optimized.find_children("*","MeshInstance3D",true,false)
+		verify(merged_meshes.size() < source_meshes.size(),type+" static batching reduces mesh count")
+		var counts = []
+		for meshes in [source_meshes,merged_meshes]:
+			var count = 0
+			for mesh in meshes:
+				for surface in range(mesh.mesh.get_surface_count()):
+					var arrays = mesh.mesh.surface_get_arrays(surface)
+					count += arrays[Mesh.ARRAY_INDEX].size() if arrays[Mesh.ARRAY_INDEX] != null and not arrays[Mesh.ARRAY_INDEX].is_empty() else arrays[Mesh.ARRAY_VERTEX].size()
+			counts.append(count)
+		verify(counts[0] == counts[1],type+" batching preserves triangle count")
+		var player = animation(optimized)
+		if player:
+			for clip in player.get_animation_list():
+				var anim = player.get_animation(clip)
+				for track in range(anim.get_track_count()):
+					verify(player.get_node(player.root_node).get_node_or_null(NodePath(str(anim.track_get_path(track)).get_slice(":",0))) != null,type+" optimized animation target: "+str(anim.track_get_path(track)))
+		original.free()
 	game.start_match()
 	game.sim.ai_enabled = false
 	game.show_guide("barracks")

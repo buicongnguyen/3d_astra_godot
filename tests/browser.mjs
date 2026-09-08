@@ -7,12 +7,12 @@ const browser=await chromium.launch({headless:true,executablePath:process.platfo
 const reports=[];
 try {
 for(const mobile of [false,true]){
- const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1280,height:800},hasTouch:mobile,isMobile:mobile,deviceScaleFactor:1});
+ const context=await browser.newContext({viewport:mobile?{width:390,height:844}:{width:1280,height:800},hasTouch:mobile,isMobile:mobile,deviceScaleFactor:mobile?3:1});
  const page=await context.newPage();const errors=[];
  page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('response',r=>{if(r.status()>=400)errors.push(`${r.status()} ${r.url()}`);});
  const state=()=>page.evaluate(()=>window.frontierState);
  const cmd=async o=>{await page.evaluate(o=>window.frontierCommand(JSON.stringify(o)),o);await page.waitForTimeout(120);};
- const press=async text=>{
+ const clickVisible=async text=>{
    await page.waitForFunction(t=>window.frontierState?.buttons.some(b=>b.text===t),text);
    const snapshot=await state();const serial=snapshot.ui_action_serial;
    const b=snapshot.buttons.find(b=>b.text===text);assert(b,`button ${text}`);
@@ -20,12 +20,25 @@ for(const mobile of [false,true]){
    if(mobile)await page.touchscreen.tap(p.x,p.y);else await page.mouse.click(p.x,p.y);
    await page.waitForFunction(serial=>window.frontierState.ui_action_serial>serial,serial);
  };
+ const press=async text=>{
+   let s=await state();
+   if(mobile && !s.buttons.some(b=>b.text===text)) {
+     while((await state()).action_page>0)await clickVisible('Previous');
+     for(let i=0;i<s.action_pages;i++){
+       s=await state();
+       if(s.buttons.some(b=>b.text===text))break;
+       if(s.action_page<s.action_pages-1)await clickVisible('More actions');
+     }
+   }
+   await clickVisible(text);
+ };
  try {
  await page.goto(url+'?test=1');
  await page.waitForFunction(()=>window.frontierState?.ready,null,{timeout:90000});
+ if(mobile)assert.deepEqual((await state()).viewport,[390,844],'DPR 3 HUD uses logical phone pixels');
  assert.equal((await state()).models,18);
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-briefing.png`});
- // Intro stays paused; scrolling exposes its controls on short displays.
+ // Intro stays paused; its footer controls remain fixed on short displays.
  await press('Army & graphics settings');assert.equal((await state()).settings_open,true);
  await press('High contrast: Gold / Violet');
  await press('Apply settings');assert.equal((await state()).settings.player,3);assert.equal((await state()).started,false);
@@ -77,8 +90,7 @@ for(const mobile of [false,true]){
    await page.setViewportSize({width:844,height:390});await page.waitForTimeout(400);
    await press('Pause');await press('Army & graphics settings');
    await page.screenshot({path:'test-results/mobile-landscape-settings.png'});
-   // Scroll the Godot ScrollContainer to its footer, then cancel.
-   await page.mouse.move(500,260);await page.mouse.wheel(0,550);await page.waitForTimeout(350);await press('Cancel');await press('Resume');
+   await press('Cancel');await press('Resume');
    await page.setViewportSize({width:390,height:844});await page.waitForTimeout(400);
  }
  // Progress through the real upgrade and production controls on both input modes.
@@ -106,10 +118,42 @@ for(const mobile of [false,true]){
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-medic-support.png`});
  await cmd({action:'select',ids:[hq.id]});
  await press('Upgrade L3 · 350/175');await cmd({action:'step',seconds:31});assert.equal((await state()).tech_level,3);
+ if(mobile){
+   // Inspect actual canvas coordinates without auto-scrolling hidden controls into view.
+   for(const viewport of [{width:320,height:568},{width:390,height:844},{width:667,height:375},{width:844,height:390},{width:768,height:1024}]){
+     await page.setViewportSize(viewport);await page.waitForTimeout(350);
+     const fits=(b,r=[0,0,viewport.width,viewport.height])=>{
+       assert.ok(b.x>=r[0]-1 && b.y>=r[1]-1 && b.x+b.w<=r[0]+r[2]+1 && b.y+b.h<=r[1]+r[3]+1,`${b.text} clipped at ${viewport.width}x${viewport.height}: ${JSON.stringify(b)} in ${r}`);
+       assert.ok(b.h>=44,`${b.text} touch height`);
+     };
+     for(const type of ['worker','hq','barracks','medic']){
+       const entity=(await state()).entities.find(e=>e.type===type&&e.team===0);
+       await cmd({action:'select',ids:[entity.id]});
+       const names=new Set();
+       for(let p=0;p<(await state()).action_pages;p++){
+         const s=await state();assert.equal(s.mobile_layout,true);
+         for(const b of s.action_buttons){fits(b);fits(b,s.action_rect);names.add(b.text);}
+         for(const text of ['Previous','More actions'])fits(s.buttons.find(b=>b.text===text));
+         if(p<s.action_pages-1)await clickVisible('More actions');
+       }
+       assert.ok(names.has('Info & stats'),`${type} guide reachable`);
+       if(type==='medic')assert.ok(names.has('Support'));
+     }
+     await press('Pause');
+     for(const text of ['Resume','Army & graphics settings'])fits((await state()).buttons.find(b=>b.text===text));
+     await press('Army & graphics settings');
+     for(const text of ['Apply settings','Cancel'])fits((await state()).buttons.find(b=>b.text===text));
+     await press('Cancel');await press('Resume');
+     await page.screenshot({path:`test-results/mobile-controls-${viewport.width}x${viewport.height}.png`});
+   }
+   await page.setViewportSize({width:390,height:844});await page.waitForTimeout(350);
+ }
  await cmd({action:'camera',x:-20,z:18,zoom:48});
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-game.png`});
  await cmd({action:'outcome',team:1});assert.equal((await state()).result,'victory');
- await press('New expedition');assert.equal((await state()).started,false);assert.equal((await state()).models,18);
+ await press('New expedition');assert.equal((await state()).started,false);
+ // The UI callback acknowledges restart before the next render refresh recreates models.
+ await page.waitForFunction(()=>window.frontierState.models===18);
  assert.equal((await state()).settings.player,3);
  await page.reload();await page.waitForFunction(()=>window.frontierState?.ready,null,{timeout:90000});assert.equal((await state()).settings.player,3);
  assert.deepEqual(errors,[]);reports.push({mobile,passed:true,errors});
