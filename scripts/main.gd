@@ -204,6 +204,8 @@ func make_ui():
 	selection_label = label("SELECT YOUR EXPEDITION",18)
 	bottom.add_child(selection_label)
 	info_label = label("",13)
+	# Wrap before the first layout so single-line minimum width cannot enlarge the label.
+	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	bottom.add_child(info_label)
 	actions = HFlowContainer.new()
 	actions.add_theme_constant_override("h_separation",6)
@@ -890,6 +892,8 @@ func publish_state():
 	state.groups = groups
 	state.notice = notice.text
 	state.selection_info = info_label.text
+	state.selection_info_rect = [info_label.global_position.x,info_label.global_position.y,info_label.size.x,info_label.size.y]
+	state.selection_info_lines = info_label.get_line_count()
 	state.guide_open = is_instance_valid(guide_panel)
 	state.tech_level = sim.tech_level(0)
 	state.mobile_layout = mobile_layout
