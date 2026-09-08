@@ -7,7 +7,7 @@ func check(ok: bool, text: String):
 func _initialize():
 	var sim = Simulation.new(false,false)
 	var rocket = sim.spawn("antitank",0,Vector2(0,20))
-	for pair in [["tank",60],["breaker",60],["ranger",20],["tower",20]]:
+	for pair in [["tank",80],["breaker",80],["ranger",20],["tower",20]]:
 		var target = sim.spawn(pair[0],1,Vector2(0,24))
 		var near = sim.spawn("ranger",1,Vector2(1,24))
 		var ally = sim.spawn("ranger",0,Vector2(0.5,24))
@@ -28,7 +28,7 @@ func _initialize():
 	sim.players[0].upgrade = true
 	var enemy_tank = sim.spawn("tank",1,Vector2(0,24))
 	sim.hit(rocket,enemy_tank)
-	check(is_equal_approx(enemy_tank.shield,34),"weapon research scales rocket bonus once")
+	check(is_equal_approx(enemy_tank.shield,12),"weapon research scales rocket bonus once")
 	sim = Simulation.new(false,false)
 	sim.players[0].alloy = 5000; sim.players[0].energy = 5000
 	var foundry = sim.spawn("foundry",0,Vector2(-9,34))

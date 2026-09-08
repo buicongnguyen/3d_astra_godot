@@ -125,8 +125,8 @@ func box(parent: Node3D,p: Vector3,size: Vector3,color: Color) -> MeshInstance3D
 	return node
 
 func surface(p: Vector2) -> Color:
-	if not sim.nav.river: return Color("8b805e")
-	if absf(p.y) < 5: return Color("777258")
+	if sim.map_id == "classic": return Color("8b805e")
+	if sim.nav.river and absf(p.y) < 5: return Color("777258")
 	if minf(absf(p.x-22),absf(p.x+22)) < 2.3 or absf(p.y+p.x*0.35) < 1.8: return Color("af9973")
 	var n = sin(p.x*0.13)*cos(p.y*0.17)+sin((p.x+p.y)*0.09)
 	return Color("b09e76") if n > 0.65 else (Color("887b5d") if n < -0.4 else Color("788566"))
@@ -144,12 +144,12 @@ func build_map():
 	effects.clear()
 	terrain = Node3D.new()
 	add_child(terrain)
-	box(terrain,Vector3(0,-1,0),Vector3(98,1,98),Color("333d36"))
+	box(terrain,Vector3(0,-1,0),Vector3(sim.nav.half*2+2,1,sim.nav.half*2+2),Color("333d36"))
 	# One terrain mesh; vertex colors provide inexpensive surface variation.
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	for z in range(-48,48,2):
-		for x in range(-48,48,2):
+	for z in range(-int(sim.nav.half),int(sim.nav.half),2):
+		for x in range(-int(sim.nav.half),int(sim.nav.half),2):
 			for corner in [Vector2(0,0),Vector2(0,2),Vector2(2,0),Vector2(2,0),Vector2(0,2),Vector2(2,2)]:
 				var p = Vector2(x,z)+corner
 				var height = -0.38 if sim.nav.river and absf(p.y) <= 3 else 0.0
@@ -178,7 +178,7 @@ func build_map():
 	if sim.nav.river:
 		var water = MeshInstance3D.new()
 		var plane = PlaneMesh.new()
-		plane.size = Vector2(96,6)
+		plane.size = Vector2(sim.nav.half*2,6)
 		water.mesh = plane
 		water.position.y = -0.08
 		water_material = ShaderMaterial.new()
@@ -224,11 +224,11 @@ func build_map():
 			crystal.material_override = material(Color("e8ae52") if r.type == "alloy" else Color("5dc9ed"))
 			group.add_child(crystal)
 		resource_objects[r.id] = group
-	fog_image = Image.create(48,48,false,Image.FORMAT_RGBA8)
+	fog_image = Image.create(sim.nav.grid_size,sim.nav.grid_size,false,Image.FORMAT_RGBA8)
 	fog_texture = ImageTexture.create_from_image(fog_image)
 	var fog = MeshInstance3D.new()
 	var fog_mesh = PlaneMesh.new()
-	fog_mesh.size = Vector2(96,96)
+	fog_mesh.size = Vector2.ONE*sim.nav.half*2
 	fog.mesh = fog_mesh
 	fog.position.y = 0.65
 	var fog_mat = ShaderMaterial.new()
@@ -322,7 +322,7 @@ func find_animation(node: Node):
 	return null
 
 func update_camera():
-	focus = focus.clamp(Vector2(-44,-44),Vector2(44,44))
+	focus = focus.clamp(Vector2.ONE*(-sim.nav.half+4),Vector2.ONE*(sim.nav.half-4))
 	zoom = clampf(zoom,20,80)
 	camera.size = zoom
 	camera.keep_aspect = Camera3D.KEEP_WIDTH if get_viewport().get_visible_rect().size.x < get_viewport().get_visible_rect().size.y else Camera3D.KEEP_HEIGHT
@@ -404,9 +404,9 @@ func refresh(dt: float):
 	if water_material: water_material.set_shader_parameter("clock",sim.time if water_motion else 0.0)
 	fog_clock -= dt
 	if fog_clock <= 0:
-		for y in range(48):
-			for x in range(48):
-				var index = y*48+x
+		for y in range(sim.nav.grid_size):
+			for x in range(sim.nav.grid_size):
+				var index = y*sim.nav.grid_size+x
 				fog_image.set_pixel(x,y,Color(0,0,0,0.0 if sim.visible[0][index] else (0.6 if sim.explored[0][index] else 0.94)))
 		fog_texture.update(fog_image)
 		fog_clock = 0.25

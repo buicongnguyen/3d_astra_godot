@@ -71,3 +71,6 @@ One world unit is one meter. GLBs use Y-up and ground-centered origins. Team and
 Push `main` over SSH to trigger `.github/workflows/pages.yml`. CI verifies official engine hashes, imports assets, runs logic/asset tests, exports native/web, then tests desktop/touch browser interactions before deploying Pages. The web preset is **single-threaded**, so it needs no cross-origin-isolation workaround. See [Godot's web export documentation](https://docs.godotengine.org/en/stable/tutorials/export/exporting_for_web.html).
 
 This is a playable RTS prototype, not a commercial-scale replacement for Age of Empires or StarCraft. Physical Android/iOS testing, large-army batching, true elevation and deeper balance work remain follow-ups documented in the improvement plan.
+
+
+The [resource and stage expansion](docs/EXPANSION_STAGES.md) adds 25% more deposit reserves, Copper Basin (128×128), and Frontier Expanse (160×160). Choose a battlefield before Deploy. Build a Command core near remote deposits to shorten delivery trips. Tanks now have 460 HP / 100 shield; anti-tank rockets deal 80 damage to vehicles.

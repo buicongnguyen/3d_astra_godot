@@ -195,7 +195,7 @@ func make_ui():
 	header.add_child(resource_label)
 	nav_buttons = HBoxContainer.new()
 	header.add_child(nav_buttons)
-	nav_buttons.add_child(button("Home",func(): view.focus = Vector2(-25,24)))
+	nav_buttons.add_child(button("Home",func(): view.focus = Vector2(-25-sim.map_config.offset,24+sim.map_config.offset)))
 	nav_buttons.add_child(button("−",func(): view.zoom += 5))
 	nav_buttons.add_child(button("+",func(): view.zoom -= 5))
 	nav_buttons.add_child(button("Pause",toggle_pause))
@@ -253,8 +253,10 @@ func make_ui():
 	modal_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	modal_body.add_child(modal_desc)
 	scenario = OptionButton.new()
-	scenario.add_item("Meridian Riverlands")
-	scenario.add_item("Ashen Frontier")
+	scenario.add_item("Meridian Riverlands · 96×96")
+	scenario.add_item("Ashen Frontier · 96×96")
+	scenario.add_item("Copper Basin · 128×128")
+	scenario.add_item("Frontier Expanse · 160×160")
 	scenario.custom_minimum_size.y = 40
 	modal_body.add_child(scenario)
 	modal_actions = VBoxContainer.new()
@@ -362,7 +364,8 @@ func show_briefing():
 	modal_actions.add_child(button("Army & graphics settings",show_settings))
 
 func start_match():
-	if sim.nav.river != (scenario.selected == 0): reset_sim(scenario.selected == 0)
+	var stage_id = ["riverlands","classic","basin","expanse"][scenario.selected]
+	if sim.map_id != stage_id: reset_sim(scenario.selected == 0,stage_id)
 	started = true
 	paused = false
 	modal.visible = false
@@ -371,12 +374,12 @@ func start_match():
 	action_signature = ""
 	acknowledge()
 
-func reset_sim(river: bool):
+func reset_sim(river: bool, stage_id: String = ""):
 	test_manual_clock = false
-	sim = Simulation.new(true,river)
+	sim = Simulation.new(true,river,stage_id)
 	view.sim = sim
 	view.build_map()
-	view.focus = Vector2(-20,20)
+	view.focus = Vector2(-20-sim.map_config.offset,20+sim.map_config.offset)
 	view.zoom = 44
 	selected.clear()
 	groups.clear()
@@ -391,7 +394,7 @@ func reset_sim(river: bool):
 	apply_settings()
 
 func restart_match():
-	reset_sim(sim.nav.river)
+	reset_sim(sim.nav.river,sim.map_id)
 	started = false
 	show_briefing()
 
@@ -520,7 +523,7 @@ MATCH STAGES
 1. Establish an economy and mixed army.
 2. Upgrade your core and production buildings to L2; add Medics, Engineers and Anti-tank soldiers.
 3. Reach L3 to unlock Battle tanks at the Foundry and strengthen your base, then destroy the enemy cores.
-These are technology stages within either skirmish map."
+These are technology stages within each selectable skirmish stage."
 	return text
 
 func show_guide(type: String = "hq"):
@@ -593,7 +596,7 @@ func context_order(screen: Vector2,attack: bool = false):
 
 func click_world(point: Vector2,touch: bool = false):
 	if minimap_rect.has_point(point):
-		view.focus = (point-minimap_rect.position)/minimap_rect.size*96-Vector2(48,48)
+		view.focus = (point-minimap_rect.position)/minimap_rect.size*(sim.nav.half*2)-Vector2.ONE*sim.nav.half
 		return
 	if mode == "build":
 		placement_point = view.ground(point)
@@ -655,7 +658,7 @@ func _unhandled_input(event):
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode == KEY_Q and not event.ctrl_pressed: mode = "attack"
 		if event.keycode == KEY_X: sim.issue(selected,{"type":"stop"})
-		if event.keycode == KEY_H: view.focus = Vector2(-25,24)
+		if event.keycode == KEY_H: view.focus = Vector2(-25-sim.map_config.offset,24+sim.map_config.offset)
 		if event.keycode == KEY_F and not selected.is_empty():
 			var e = sim.entity(selected[0])
 			if not e.is_empty(): view.focus = e.p
@@ -670,7 +673,7 @@ func _unhandled_input(event):
 		if event.button_index == MOUSE_BUTTON_MIDDLE: middle_down = event.pressed
 		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
 			if minimap_rect.has_point(event.position):
-				var p = (event.position-minimap_rect.position)/minimap_rect.size*96-Vector2(48,48)
+				var p = (event.position-minimap_rect.position)/minimap_rect.size*(sim.nav.half*2)-Vector2.ONE*sim.nav.half
 				sim.issue(selected,{"type":"move","p":p},event.shift_pressed)
 			else: context_order(event.position)
 		if event.button_index == MOUSE_BUTTON_LEFT:
@@ -726,7 +729,7 @@ func refresh_ui():
 	var harvest = workers.any(func(e): return not e.orders.is_empty() and e.orders[0].type in ["gather","deliver"])
 	var supply = sim.own(0).any(func(e): return e.type == "relay" and e.complete)
 	var army_size = sim.own(0).filter(func(e): return e.kind == "unit" and e.type != "worker").size()
-	objective.text = "Tech %d / 3 · " % sim.tech_level(0)+("1 / 4  Assign workers to alloy and energy" if not harvest else ("2 / 4  Construct a Supply relay" if not supply else ("3 / 4  Train an army of eight" if army_size < 8 else "4 / 4  Attack across the river")))+"\nIdle workers: "+str(idle.size())
+	objective.text = "Tech %d / 3 · " % sim.tech_level(0)+("1 / 4  Assign workers to alloy and energy" if not harvest else ("2 / 4  Construct a Supply relay" if not supply else ("3 / 4  Train an army of eight" if army_size < 8 else "4 / 4  Destroy the enemy Command core")))+"\nIdle workers: "+str(idle.size())
 	for e in sim.entities:
 		if e.team == 1 and e.kind == "building" and sim.seen(e.p): known_buildings[e.id] = {"p":e.p,"type":e.type}
 	for id in known_buildings.keys():
@@ -829,6 +832,8 @@ func test_call(args):
 	var command = JSON.parse_string(str(args[0]))
 	if not command is Dictionary: return
 	match command.get("action",""):
+		"stage":
+			scenario.selected = int(command.get("index",0))
 		"start":
 			start_match()
 			sim.ai_enabled = false
@@ -892,6 +897,9 @@ func publish_state():
 	collect_buttons(actions,state.action_buttons)
 	state.action_rect = [action_scroll.global_position.x,action_scroll.global_position.y,action_scroll.size.x,action_scroll.size.y]
 	state.ui_action_serial = ui_action_serial
+	state.minimap_rect = [minimap_rect.position.x,minimap_rect.position.y,minimap_rect.size.x,minimap_rect.size.y]
+	state.map_id = sim.map_id
+	state.map_size = sim.nav.half*2
 	state.building_probes = sim.own(0).filter(func(e): return e.kind == "building").map(func(e):
 		var point = view.camera.unproject_position(Vector3(e.p.x+minf(2,e.radius*0.7),2.6,e.p.y))
 		return {"id":e.id,"screen":[point.x,point.y]}

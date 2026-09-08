@@ -1,6 +1,7 @@
 extends RefCounted
 const Catalog = preload("res://scripts/catalog.gd")
-const HALF = 48.0
+var half = 48.0
+var grid_size = 48
 var grids: Dictionary = {}
 var obstacles: Array = []
 var revision = 0
@@ -10,10 +11,10 @@ func _init():
 	Catalog.load_data()
 
 func terrain_free(p: Vector2, r: float) -> bool:
-	if not p.is_finite() or not is_finite(r) or r < 0 or absf(p.x) > HALF-r or absf(p.y) > HALF-r:
+	if not p.is_finite() or not is_finite(r) or r < 0 or absf(p.x) > half-r or absf(p.y) > half-r:
 		return false
 	if river:
-		for span in [Vector2(-48,-27),Vector2(-17,-5),Vector2(5,17),Vector2(27,48)]:
+		for span in [Vector2(-half,-27),Vector2(-17,-5),Vector2(5,17),Vector2(27,half)]:
 			var closest = Vector2(clampf(p.x,span.x,span.y),clampf(p.y,-3,3))
 			if p.distance_to(closest) < r + 0.01:
 				return false
@@ -58,21 +59,21 @@ func grid_for(radius: float) -> AStarGrid2D:
 	var key = ceili(radius*100)
 	if grids.has(key): return grids[key]
 	var grid = AStarGrid2D.new()
-	grid.region = Rect2i(0,0,48,48)
+	grid.region = Rect2i(0,0,grid_size,grid_size)
 	grid.cell_size = Vector2(2,2)
-	grid.offset = Vector2(-47,-47)
+	grid.offset = Vector2(-half+1,-half+1)
 	grid.diagonal_mode = AStarGrid2D.DIAGONAL_MODE_ONLY_IF_NO_OBSTACLES
 	grid.update()
-	for z in range(48):
-		for x in range(48):
+	for z in range(grid_size):
+		for x in range(grid_size):
 			# Grid vertices need clearance for the segments between cell centers.
 			# Without this margin, a path can graze a circular building at its midpoint.
-			grid.set_point_solid(Vector2i(x,z),not can_stand(Vector2(x*2-47,z*2-47),radius+0.6))
+			grid.set_point_solid(Vector2i(x,z),not can_stand(Vector2(x*2-half+1,z*2-half+1),radius+0.6))
 	grids[key] = grid
 	return grid
 
 func cell(p: Vector2) -> Vector2i:
-	return Vector2i(clampi(floori((p.x+48)/2),0,47),clampi(floori((p.y+48)/2),0,47))
+	return Vector2i(clampi(floori((p.x+half)/2),0,grid_size-1),clampi(floori((p.y+half)/2),0,grid_size-1))
 
 func nearest(grid: AStarGrid2D,p: Vector2) -> Vector2i:
 	var center = cell(p)
@@ -80,8 +81,8 @@ func nearest(grid: AStarGrid2D,p: Vector2) -> Vector2i:
 	for r in range(1,7):
 		var best = Vector2i(-1,-1)
 		var distance = INF
-		for y in range(maxi(0,center.y-r),mini(48,center.y+r+1)):
-			for x in range(maxi(0,center.x-r),mini(48,center.x+r+1)):
+		for y in range(maxi(0,center.y-r),mini(grid_size,center.y+r+1)):
+			for x in range(maxi(0,center.x-r),mini(grid_size,center.x+r+1)):
 				var c = Vector2i(x,y)
 				if grid.is_point_solid(c): continue
 				var d = grid.get_point_position(c).distance_squared_to(p)

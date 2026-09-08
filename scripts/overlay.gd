@@ -22,14 +22,15 @@ func _draw():
 	draw_rect(rect.grow(3),Color("1d393e"))
 	draw_rect(rect,Color("536653"))
 	if game.sim.nav.river:
-		draw_rect(Rect2(rect.position+Vector2(0,rect.size.y*0.46875),Vector2(rect.size.x,rect.size.y*0.0625)),Color("477e85"))
+		draw_rect(Rect2(rect.position+Vector2(0,rect.size.y*(0.5-3.0/(game.sim.nav.half*2))),Vector2(rect.size.x,rect.size.y*6.0/(game.sim.nav.half*2))),Color("477e85"))
 		for x in [-22,0,22]:
-			draw_rect(Rect2(map_point(Vector2(x-5,-3)),rect.size*Vector2(10.0/96,6.0/96)),Color("b7ac86"))
-	for y in range(24):
-		for x in range(24):
-			var index = y*2*48+x*2
+			draw_rect(Rect2(map_point(Vector2(x-5,-3)),rect.size*Vector2(10,6)/(game.sim.nav.half*2)),Color("b7ac86"))
+	var fog_cells = game.sim.nav.grid_size/2
+	for y in range(fog_cells):
+		for x in range(fog_cells):
+			var index = y*2*game.sim.nav.grid_size+x*2
 			if not game.sim.visible[0][index]:
-				draw_rect(Rect2(rect.position+rect.size*Vector2(x,y)/24,rect.size/24+Vector2.ONE),Color(0.015,0.04,0.05,0.55 if game.sim.explored[0][index] else 0.94))
+				draw_rect(Rect2(rect.position+rect.size*Vector2(x,y)/fog_cells,rect.size/fog_cells+Vector2.ONE),Color(0.015,0.04,0.05,0.55 if game.sim.explored[0][index] else 0.94))
 	for r in game.sim.deposits:
 		if r.amount > 0 and game.sim.discovered(r.p): draw_circle(map_point(r.p),2,Color("edc76f") if r.type == "alloy" else Color("69cbee"))
 	for e in game.sim.entities:
@@ -45,4 +46,4 @@ func _draw():
 	draw_rect(Rect2(focus-Vector2(10,7),Vector2(20,14)),Color("f4edcb"),false,1)
 
 func map_point(p: Vector2) -> Vector2:
-	return game.minimap_rect.position+(p+Vector2(48,48))/96*game.minimap_rect.size
+	return game.minimap_rect.position+(p+Vector2.ONE*game.sim.nav.half)/(game.sim.nav.half*2)*game.minimap_rect.size

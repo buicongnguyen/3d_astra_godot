@@ -15,19 +15,25 @@ var ai_enabled = true
 var ai_clock = 0.0
 var vision_clock = 0.0
 var wave_at = 85.0
+var map_id = "riverlands"
+var map_config: Dictionary
 var message = "Assign Harvesters to the amber alloy deposits."
 
 func feedback(text: String,team: int):
 	if team == 0: message = text
 
-func _init(ai: bool = true, river: bool = true):
+func _init(ai: bool = true, river: bool = true, stage_id: String = ""):
 	Catalog.load_data()
 	ai_enabled = ai
-	nav.river = river
+	map_id = stage_id if Catalog.maps.has(stage_id) else ("riverlands" if river else "classic")
+	map_config = Catalog.maps[map_id]
+	nav.river = map_config.river
+	nav.half = map_config.size/2.0
+	nav.grid_size = int(map_config.size/2)
 	for team in range(2):
 		players.append({"alloy":450.0,"energy":150.0,"upgrade":false,"kills":0})
 		var v = PackedByteArray()
-		v.resize(2304)
+		v.resize(nav.grid_size*nav.grid_size)
 		visible.append(v.duplicate())
 		explored.append(v.duplicate())
 		var side = 1 if team == 0 else -1
@@ -37,10 +43,18 @@ func _init(ai: bool = true, river: bool = true):
 		spawn("ranger",team,Vector2(-18,17)*side)
 		spawn("ranger",team,Vector2(-15,17)*side)
 		spawn("vanguard",team,Vector2(-12,17)*side)
-		for p in [Vector2(-36,18),Vector2(-37,22),Vector2(-35,26)]: resource("alloy",p*side,1600)
-		resource("energy",Vector2(-30,34)*side,1400)
-		resource("alloy",Vector2(-31,-25)*side,2400)
-		resource("energy",Vector2(-25,-32)*side,1800)
+		for p in [Vector2(-36,18),Vector2(-37,22),Vector2(-35,26)]: resource("alloy",p*side,2000)
+		resource("energy",Vector2(-30,34)*side,1750)
+		var shift = Vector2(-map_config.offset,map_config.offset)*side
+		for e in own(team): e.p += shift
+		for r in deposits.slice(-4): r.p += shift
+		resource("alloy",Vector2(-31,-25)*side,3000)
+		resource("energy",Vector2(-25,-32)*side,2250)
+		for site in map_config.sites:
+			var p = Vector2(site[0],site[1])
+			resource("alloy",p*side,3000)
+			resource("alloy",(p+Vector2(4,0))*side,3000)
+			resource("energy",(p+Vector2(2,5))*side,2250)
 	nav.rebuild(entities)
 	update_vision()
 
@@ -83,11 +97,11 @@ func pay(team: int,cost: Array,factor: float = 1.0):
 
 func seen(p: Vector2,team: int = 0) -> bool:
 	var c = nav.cell(p)
-	return visible[team][c.y*48+c.x] == 1
+	return visible[team][c.y*nav.grid_size+c.x] == 1
 
 func discovered(p: Vector2,team: int = 0) -> bool:
 	var c = nav.cell(p)
-	return explored[team][c.y*48+c.x] == 1
+	return explored[team][c.y*nav.grid_size+c.x] == 1
 
 func update_vision():
 	for team in range(2):
@@ -95,11 +109,11 @@ func update_vision():
 		for e in own(team):
 			var c = nav.cell(e.p)
 			var r = ceili(e.vision/2)
-			for y in range(maxi(0,c.y-r),mini(48,c.y+r+1)):
-				for x in range(maxi(0,c.x-r),mini(48,c.x+r+1)):
-					if e.p.distance_to(Vector2(x*2-47,y*2-47)) <= e.vision:
-						visible[team][y*48+x] = 1
-						explored[team][y*48+x] = 1
+			for y in range(maxi(0,c.y-r),mini(nav.grid_size,c.y+r+1)):
+				for x in range(maxi(0,c.x-r),mini(nav.grid_size,c.x+r+1)):
+					if e.p.distance_to(Vector2(x*2-nav.half+1,y*2-nav.half+1)) <= e.vision:
+						visible[team][y*nav.grid_size+x] = 1
+						explored[team][y*nav.grid_size+x] = 1
 
 func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 	if result != "" or not order.get("type","") in ["move","attackmove","attack","gather","deliver","build","support","stop"]: return
@@ -275,7 +289,7 @@ func placement(type: String,p: Vector2,team: int = 0) -> String:
 	if d.get("kind","") != "building" or not p.is_finite(): return "Invalid site."
 	var missing = construction_requirements(type,team)
 	if missing != "": return missing
-	if absf(p.x) > 46-d.radius or absf(p.y) > 46-d.radius: return "Outside buildable area."
+	if absf(p.x) > nav.half-2-d.radius or absf(p.y) > nav.half-2-d.radius: return "Outside buildable area."
 	if nav.river and absf(p.y) < 7+d.radius: return "Keep river banks and crossing approaches clear."
 	if not seen(p,team): return "Explore the site first."
 	for o in nav.obstacles:
@@ -496,7 +510,7 @@ func update_ai():
 		var built = false
 		for radius in [10,17,23]:
 			for i in range(12):
-				var p = Vector2(25,-24)+Vector2(cos(float(i)/12*TAU),sin(float(i)/12*TAU))*radius
+				var p = Vector2(25+map_config.offset,-24-map_config.offset)+Vector2(cos(float(i)/12*TAU),sin(float(i)/12*TAU))*radius
 				if placement(want,p,1) == "" and not build(workers[0].id,want,p,1).is_empty():
 					built = true
 					break
@@ -520,7 +534,7 @@ func update_ai():
 	if not threat.is_empty():
 		issue(army.filter(func(e): return e.get("damage",0) > 0 and (e.orders.is_empty() or e.orders[0].type != "attack")).map(func(e): return e.id),{"type":"attack","target":threat.id},false,1)
 	elif time >= wave_at and army.size() >= 4:
-		issue(army.map(func(e): return e.id),{"type":"attackmove","p":Vector2(-25,24)},false,1)
+		issue(army.map(func(e): return e.id),{"type":"attackmove","p":Vector2(-25-map_config.offset,24+map_config.offset)},false,1)
 		wave_at = time+50
 
 func tick(dt: float):
