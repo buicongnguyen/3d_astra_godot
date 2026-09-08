@@ -231,7 +231,7 @@ func update_level(b: Dictionary,dt: float):
 
 func support_valid(e: Dictionary,t: Dictionary) -> bool:
 	if e.get("support",0) <= 0 or t.is_empty() or t.get("team",-1) != e.team or t.id == e.id or t.get("hp",0) <= 0 or not t.complete: return false
-	return (t.kind == "unit" and t.type != "breaker") if e.type == "medic" else (t.kind == "building" or t.type == "breaker")
+	return (t.kind == "unit" and not t.get("mechanical",false)) if e.type == "medic" else (t.kind == "building" or t.get("mechanical",false))
 
 func support_target(e: Dictionary) -> Dictionary:
 	var best = {}
@@ -376,7 +376,7 @@ func apply_damage(t: Dictionary,damage: float,team: int):
 		if t.kind == "building": nav.rebuild(entities)
 
 func hit(e: Dictionary,t: Dictionary):
-	var damage = attack_value(e)*(1.6 if e.get("counter","") == t.type else 1.0)
+	var damage = attack_value(e)*(1.6 if e.get("counter","") == t.type else 1.0)*(e.get("mechanical_bonus",1) if t.get("mechanical",false) else 1)
 	apply_damage(t,damage,e.team)
 	if e.type == "breaker":
 		for other in entities:
@@ -510,6 +510,8 @@ func update_ai():
 			continue
 		if b.complete and b.type in ["barracks","foundry"] and b.queue.size() < 2:
 			var choice = "breaker" if b.type == "foundry" else ("vanguard" if floori(time/4)%3 == 0 else "ranger")
+			if b.type == "foundry" and b.level >= 3 and army.filter(func(e): return e.type == "tank").size() <= army.filter(func(e): return e.type == "breaker").size(): choice = "tank"
+			if b.type == "barracks" and b.level >= 2 and army.filter(func(e): return e.type == "antitank").size() < 3: choice = "antitank"
 			var support_type = "engineer" if b.type == "foundry" else "medic"
 			if b.level >= 2 and army.filter(func(e): return e.type == support_type).size() < 2: choice = support_type
 			enqueue(b.id,choice,1)

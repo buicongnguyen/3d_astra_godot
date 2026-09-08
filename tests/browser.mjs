@@ -127,6 +127,18 @@ for(const mobile of [false,true]){
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-medic-support.png`});
  await cmd({action:'select',ids:[hq.id]});
  await press('Upgrade L3 · 350/175');await cmd({action:'step',seconds:31});assert.equal((await state()).tech_level,3);
+ await cmd({action:'select',ids:[production.id]});
+ await press('Anti-tank soldier · 125/50');await cmd({action:'step',seconds:15});
+ assert.ok((await state()).entities.some(e=>e.type==='antitank'&&e.team===0));
+ await cmd({action:'heavy_setup'});
+ const foundry=(await state()).entities.find(e=>e.type==='foundry'&&e.team===0);
+ await cmd({action:'select',ids:[foundry.id]});
+ await press('Battle tank · 275/125');assert.match((await state()).notice,/Upgrade Foundry to level 3/);
+ await press('Upgrade L2 · 100/50');await cmd({action:'step',seconds:21});
+ await press('Upgrade L3 · 200/100');await cmd({action:'step',seconds:31});
+ await press('Battle tank · 275/125');await cmd({action:'step',seconds:21});
+ assert.ok((await state()).entities.some(e=>e.type==='tank'&&e.team===0));
+ await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-heavy.png`});
  if(mobile){
    console.log('Progression passed; checking viewport matrix');
    // Inspect actual canvas coordinates without auto-scrolling hidden controls into view.
@@ -136,7 +148,7 @@ for(const mobile of [false,true]){
        assert.ok(b.x>=r[0]-1 && b.y>=r[1]-1 && b.x+b.w<=r[0]+r[2]+1 && b.y+b.h<=r[1]+r[3]+1,`${b.text} clipped at ${viewport.width}x${viewport.height}: ${JSON.stringify(b)} in ${r}`);
        assert.ok(b.h>=44,`${b.text} touch height`);
      };
-     for(const type of ['worker','hq','barracks','medic']){
+     for(const type of ['worker','hq','barracks','foundry','medic','tank','antitank']){
        const entity=(await state()).entities.find(e=>e.type===type&&e.team===0);
        await cmd({action:'select',ids:[entity.id]});
        const names=new Set();

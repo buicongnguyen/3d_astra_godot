@@ -12,7 +12,7 @@ func first(sim,type: String,team: int = 0) -> Dictionary:
 func _initialize(): call_deferred("run")
 func run():
 	var sim = Simulation.new(false)
-	check(Catalog.definitions.values().filter(func(d): return d.get("kind","") == "unit").size() == 6,"six distinct unit types")
+	check(Catalog.definitions.values().filter(func(d): return d.get("kind","") == "unit").size() == 8,"eight distinct unit types")
 	var core = first(sim,"hq")
 	var barracks = first(sim,"barracks")
 	var funds = sim.players[0].alloy

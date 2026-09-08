@@ -27,7 +27,7 @@ func run():
 	root.add_child(game)
 	await process_frame
 	# Optimized templates retain vertices and valid animation targets while reducing mesh nodes.
-	for type in ["worker","ranger","hq","barracks"]:
+	for type in ["worker","ranger","tank","antitank","hq","barracks"]:
 		var original = load("res://assets/models/"+type+".glb").instantiate()
 		var optimized = game.view.models[type]
 		var source_meshes = original.find_children("*","MeshInstance3D",true,false)

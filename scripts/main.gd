@@ -495,7 +495,7 @@ Deals 1.6× damage to "+Catalog.get_def(d.counter).name+"."
 		if d.has("support"): text += "
 Restores %d HP every second within range %.0f; no resource cost. Does not refill shields or revive destroyed targets." % [d.support,d.range]
 		if d.has("required_level"): text += "
-Requires level 2 "+("Barracks" if type == "medic" else "Foundry")+"."
+Requires level "+str(d.required_level)+" "+("Barracks" if type in ["medic","antitank"] else "Foundry")+"."
 	else:
 		text += "
 
@@ -503,7 +503,7 @@ BUILDING FUNCTIONS"
 		for item in d.get("trains",[]):
 			var unit = Catalog.get_def(item)
 			text += "
-• %s%s — %d alloy / %d energy" % [unit.name," (level 2)" if unit.get("required_level",1) == 2 else "",unit.cost[0],unit.cost[1]]
+• %s%s — %d alloy / %d energy" % [unit.name," (level %d)" % unit.required_level if unit.get("required_level",1) > 1 else "",unit.cost[0],unit.cost[1]]
 		if d.has("supply"): text += "
 • Provides %d supply at level 1." % d.supply
 		text += "
@@ -518,8 +518,8 @@ Other buildings require a completed Command core at the next level. Finish or ca
 
 MATCH STAGES
 1. Establish an economy and mixed army.
-2. Upgrade your core and production buildings to L2; add Medics and Engineers.
-3. Reach L3 to strengthen your base and production, then destroy the enemy cores.
+2. Upgrade your core and production buildings to L2; add Medics, Engineers and Anti-tank soldiers.
+3. Reach L3 to unlock Battle tanks at the Foundry and strengthen your base, then destroy the enemy cores.
 These are technology stages within either skirmish map."
 	return text
 
@@ -539,10 +539,10 @@ func show_guide(type: String = "hq"):
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	body.add_theme_constant_override("separation",12)
 	scroll.add_child(body)
-	body.add_child(label("FIELD GUIDE · 6 UNIT TYPES",20))
+	body.add_child(label("FIELD GUIDE · 8 UNIT TYPES",20))
 	var pick = OptionButton.new()
 	pick.custom_minimum_size.y = 44
-	var keys = ["hq","relay","barracks","foundry","tower","worker","vanguard","ranger","breaker","medic","engineer"]
+	var keys = ["hq","relay","barracks","foundry","tower","worker","vanguard","ranger","breaker","medic","engineer","tank","antitank"]
 	for key in keys: pick.add_item(Catalog.get_def(key).name)
 	pick.selected = maxi(0,keys.find(type))
 	body.add_child(pick)
@@ -844,6 +844,10 @@ func test_call(args):
 		"build": sim.build(int(command.worker),command.type,Vector2(command.x,command.z))
 		"train": sim.enqueue(int(command.id),command.type)
 		"progression_setup": sim.players[0].alloy = 5000; sim.players[0].energy = 5000
+		"heavy_setup":
+			sim.spawn("foundry",0,Vector2(-9,34))
+			sim.spawn("relay",0,Vector2(-4,34))
+			sim.nav.rebuild(sim.entities)
 		"support_setup":
 			var healer = sim.own(0).filter(func(e): return e.type == "medic")[0]
 			var ally = sim.own(0).filter(func(e): return e.type == "ranger")[0]
