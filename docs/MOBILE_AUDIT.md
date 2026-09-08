@@ -32,6 +32,8 @@ The starting scene sustained roughly 60 FPS in this sample. The larger scene imp
 
 ## Remaining device checks and improvements
 
+The additional Windows Playwright WebKit 26 probe reported `glBlitFramebuffer: Read and write color attachments cannot be the same image` and did not validate the Godot 3D scene or touch flow. The rendering error also occurred in a temporary export using the previous disabled viewport-scaling mode. This does not establish behavior on physical iOS Safari; Safari compatibility remains unverified. Three.js passed its separate WebKit smoke test.
+
 1. Run 15-minute 50–100-unit battles on a midrange Android phone and iPhone. Measure frame time, memory and thermal slowdown; test browser toolbar resizing, notches, orientation and background/resume.
 2. If large-army rendering remains the bottleneck, profile animation and material draw submission. Evaluate material atlases and distance-based animation/mesh detail while retaining recognizable units and reliable selection.
 3. Re-test CPU/GPU changes independently. Do not run concurrent browser suites while measuring performance, and keep the normal scene and stress scene results separate.
