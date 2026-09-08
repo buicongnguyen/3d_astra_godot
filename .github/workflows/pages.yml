@@ -34,6 +34,7 @@ jobs:
           Godot_v4.7.2-stable_linux.x86_64 --headless --editor --path . --import 2>&1 | tee .tools/import.log
           ! grep -E 'SCRIPT ERROR|^ERROR:' .tools/import.log
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/simulation_test.gd
+          Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/progression_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/assets_test.gd
       - name: Export Web and Windows
         run: |

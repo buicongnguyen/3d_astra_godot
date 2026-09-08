@@ -58,6 +58,8 @@ var objective: Label
 var known_buildings: Dictionary = {}
 var build_feedback = ""
 var ui_action_serial = 0
+var guide_panel: Panel
+var guide_was_paused = true
 
 func _input(event):
 	if event is InputEventKey and event.pressed: last_key = "%d/%d shift=%s ctrl=%s" % [event.keycode,event.physical_keycode,event.shift_pressed,event.ctrl_pressed]
@@ -274,6 +276,12 @@ func layout():
 		settings_panel.get_child(0).size = settings_panel.size-Vector2(36,82)
 		settings_panel.get_child(1).position = Vector2(18,settings_panel.size.y-55)
 		settings_panel.get_child(1).size = Vector2(settings_panel.size.x-36,40)
+	if is_instance_valid(guide_panel):
+		guide_panel.size = Vector2(minf(560,size.x-24),minf(640,size.y-24))
+		guide_panel.position = (size-guide_panel.size)*0.5
+		guide_panel.get_child(0).size = guide_panel.size-Vector2(32,80)
+		guide_panel.get_child(1).position = Vector2(16,guide_panel.size.y-54)
+		guide_panel.get_child(1).size = Vector2(guide_panel.size.x-32,40)
 
 func clear_children(node: Node):
 	for child in node.get_children():
@@ -402,6 +410,94 @@ func close_settings():
 		modal.visible = true
 		if modal_actions.get_child_count() > 0: modal_actions.get_child(0).grab_focus()
 
+func guide_text(type: String) -> String:
+	var d = Catalog.get_def(type)
+	var text = d.description+"
+
+"
+	text += "BASE STATS (LEVEL 1)
+HP: %d   Shield: %d
+Attack: %s per hit" % [d.hp,d.shield,str(d.get("damage",0))]
+	if d.get("damage",0) > 0: text += " every %.2fs · Range: %.1f" % [d.interval,d.range]
+	else: text += " (cannot attack)"
+	text += "
+Shields absorb damage before HP, then recharge at 4/s after 5 seconds without damage."
+	text += "
+Cost: %d alloy / %d energy · Time: %ds" % [d.cost[0],d.cost[1],d.time]
+	if d.kind == "unit":
+		text += "
+Supply: %d · Speed: %.1f" % [d.pop,d.speed]
+		if d.has("counter"): text += "
+Deals 1.6× damage to "+Catalog.get_def(d.counter).name+"."
+		if d.has("support"): text += "
+Restores %d HP every second within range %.0f; no resource cost. Does not refill shields or revive destroyed targets." % [d.support,d.range]
+		if d.has("required_level"): text += "
+Requires level 2 "+("Barracks" if type == "medic" else "Foundry")+"."
+	else:
+		text += "
+
+BUILDING FUNCTIONS"
+		for item in d.get("trains",[]):
+			var unit = Catalog.get_def(item)
+			text += "
+• %s%s — %d alloy / %d energy" % [unit.name," (level 2)" if unit.get("required_level",1) == 2 else "",unit.cost[0],unit.cost[1]]
+		if d.has("supply"): text += "
+• Provides %d supply at level 1." % d.supply
+		text += "
+
+UPGRADES
+L2: +25% base HP, +25 shield. L3: +50% base HP, +50 shield total. Production runs 20% / 40% faster. Towers gain 25% / 50% base attack; Relays gain 5 / 10 supply."
+		text += "
+Command core: L2 200/100, L3 350/175. Other buildings: L2 100/50, L3 200/100 (alloy/energy). Upgrades take 20s / 30s."
+		text += "
+Other buildings require a completed Command core at the next level. Finish or cancel production first. Cancel an upgrade for a full refund; destruction gives no refund."
+	text += "
+
+MATCH STAGES
+1. Establish an economy and mixed army.
+2. Upgrade your core and production buildings to L2; add Medics and Engineers.
+3. Reach L3 to strengthen your base and production, then destroy the enemy cores.
+These are technology stages within either skirmish map."
+	return text
+
+func show_guide(type: String = "hq"):
+	if is_instance_valid(guide_panel): return
+	guide_was_paused = paused
+	paused = true
+	modal.visible = false
+	scrim.visible = true
+	guide_panel = Panel.new()
+	ui.add_child(guide_panel)
+	var scroll = ScrollContainer.new()
+	scroll.position = Vector2(16,16)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	guide_panel.add_child(scroll)
+	var body = VBoxContainer.new()
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_theme_constant_override("separation",12)
+	scroll.add_child(body)
+	body.add_child(label("FIELD GUIDE · 6 UNIT TYPES",20))
+	var pick = OptionButton.new()
+	pick.custom_minimum_size.y = 44
+	var keys = ["hq","relay","barracks","foundry","tower","worker","vanguard","ranger","breaker","medic","engineer"]
+	for key in keys: pick.add_item(Catalog.get_def(key).name)
+	pick.selected = maxi(0,keys.find(type))
+	body.add_child(pick)
+	var detail = label(guide_text(keys[pick.selected]),14)
+	detail.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(detail)
+	pick.item_selected.connect(func(index): detail.text = guide_text(keys[index]))
+	guide_panel.add_child(button("Close field guide",close_guide))
+	layout()
+
+func close_guide():
+	if not is_instance_valid(guide_panel): return
+	guide_panel.queue_free()
+	guide_panel = null
+	paused = guide_was_paused
+	modal.visible = paused
+	scrim.visible = paused
+
 func context_order(screen: Vector2,attack: bool = false):
 	var target = view.pick(screen)
 	var p = view.ground(screen)
@@ -412,7 +508,18 @@ func context_order(screen: Vector2,attack: bool = false):
 			if not b.is_empty() and b.kind == "building": b.rally = p.clamp(Vector2(-45,-45),Vector2(45,45))
 		return
 	var order = {"type":"attackmove" if attack else "move","p":p}
+	if mode == "support":
+		var helpers = ids.filter(func(id): return sim.entity(id).get("support",0) > 0)
+		if target.is_empty() or not helpers.any(func(id): return sim.support_valid(sim.entity(id),target)):
+			sim.message = "Choose friendly infantry for a Medic, or a completed building / Breaker for an Engineer."
+			return
+		sim.issue(helpers,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
+		mode = ""
+		return
 	if not target.is_empty():
+		if target.get("team",-1) == 0:
+			sim.issue(ids,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
+			ids = ids.filter(func(id): return sim.entity(id).get("support",0) <= 0)
 		if target.kind == "resource": order = {"type":"gather","target":target.id}
 		elif target.team == 1: order = {"type":"attack","target":target.id}
 		elif not target.complete: order = {"type":"build","target":target.id}
@@ -431,7 +538,7 @@ func click_world(point: Vector2,touch: bool = false):
 		placement_ready = true
 		if not touch: confirm_build()
 		return
-	if mode in ["attack","move"]:
+	if mode in ["attack","move","support"]:
 		context_order(point,mode == "attack")
 		return
 	var target = view.pick(point)
@@ -476,7 +583,8 @@ func confirm_build():
 
 func _unhandled_input(event):
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
-		if is_instance_valid(settings_panel): close_settings()
+		if is_instance_valid(guide_panel): close_guide()
+		elif is_instance_valid(settings_panel): close_settings()
 		elif mode != "": mode = ""; view.ghost.visible = false; placement_ready = false
 		else: toggle_pause()
 		return
@@ -555,7 +663,7 @@ func refresh_ui():
 	var harvest = workers.any(func(e): return not e.orders.is_empty() and e.orders[0].type in ["gather","deliver"])
 	var supply = sim.own(0).any(func(e): return e.type == "relay" and e.complete)
 	var army_size = sim.own(0).filter(func(e): return e.kind == "unit" and e.type != "worker").size()
-	objective.text = ("1 / 4  Assign workers to alloy and energy" if not harvest else ("2 / 4  Construct a Supply relay" if not supply else ("3 / 4  Train an army of eight" if army_size < 8 else "4 / 4  Attack across the river")))+"\nIdle workers: "+str(idle.size())
+	objective.text = "Tech %d / 3 · " % sim.tech_level(0)+("1 / 4  Assign workers to alloy and energy" if not harvest else ("2 / 4  Construct a Supply relay" if not supply else ("3 / 4  Train an army of eight" if army_size < 8 else "4 / 4  Attack across the river")))+"\nIdle workers: "+str(idle.size())
 	for e in sim.entities:
 		if e.team == 1 and e.kind == "building" and sim.seen(e.p): known_buildings[e.id] = {"p":e.p,"type":e.type}
 	for id in known_buildings.keys():
@@ -566,14 +674,17 @@ func refresh_ui():
 	info_label.text = "Select troops or a building. Harvest alloy and energy to expand."
 	if not entities.is_empty():
 		var e = entities[0]
-		info_label.text = "%s · %d / %d HP" % [e.role,e.hp,e.max_hp]
+		selection_label.text += " · L%d" % e.level if e.kind == "building" else ""
+		info_label.text = "HP %d/%d · Shield %d/%d · ATK %s" % [e.hp,e.max_hp,e.shield,e.max_shield,str(snappedf(sim.attack_value(e),0.1))]
+		if e.get("support",0) > 0: info_label.text += " · Restore %d HP/s" % e.support
+		if not e.level_job.is_empty(): info_label.text += " · Upgrading L%d: %d%%" % [e.level+1,100*e.level_job.elapsed/e.level_job.time]
 		if not e.complete: info_label.text += " · Building %d%%" % (e.progress*100)
 		if not e.queue.is_empty(): info_label.text += " · %s %d%% %s" % [Catalog.get_def(e.queue[0].type).name,mini(100,int(e.queue[0].elapsed/Catalog.get_def(e.queue[0].type).time*100)),e.queue[0].blocked]
-		signature += str(e.complete)+str(e.queue.map(func(q): return q.type))
+		signature += str(e.complete)+str(e.queue.map(func(q): return q.type))+str(e.level)+str(e.level_job.is_empty())
 	if mode == "build":
 		var error = sim.placement(building_type,placement_point) if placement_ready or not touch_active else ""
 		notice.text = build_feedback if build_feedback != "" else (error if error != "" else "Place %s: %s" % [Catalog.get_def(building_type).name,"tap ground, then Confirm site." if touch_active else "click a valid site to build."])
-	else: notice.text = "Attack-move: choose a destination." if mode == "attack" else sim.message
+	else: notice.text = "Support: choose a friendly target to follow and restore." if mode == "support" else ("Attack-move: choose a destination." if mode == "attack" else sim.message)
 	notice.add_theme_color_override("font_color",Color("ffd58a") if mode == "build" or sim.message.begins_with("Need ") or sim.message.begins_with("Build ") or sim.message.begins_with("Finish ") else Color("e1ebe2"))
 	if signature == action_signature: return
 	action_signature = signature
@@ -583,11 +694,13 @@ func refresh_ui():
 		actions.add_child(button("Cancel",func(): mode = ""; placement_ready = false; view.ghost.visible = false))
 		return
 	if entities.is_empty():
+		actions.add_child(button("Field guide",func(): show_guide()))
 		actions.add_child(button("Select army",func(): selected = sim.own(0).filter(func(e): return e.kind == "unit" and e.type != "worker").map(func(e): return e.id)))
 		actions.add_child(button("Select workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker").map(func(e): return e.id)))
 		actions.add_child(button("Idle workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker" and e.orders.is_empty()).map(func(e): return e.id)))
 		return
 	var e = entities[0]
+	actions.add_child(button("Info & stats",func(): show_guide(e.type)))
 	if e.kind == "building":
 		if not e.complete: actions.add_child(button("Cancel site · 75% refund",func(): sim.cancel_building(e.id)))
 		else:
@@ -595,12 +708,17 @@ func refresh_ui():
 				var d = Catalog.get_def(type)
 				actions.add_child(button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type)))
 			for i in range(e.queue.size()): actions.add_child(button("Cancel #"+str(i+1),func(): sim.cancel_queue(e.id,i)))
+			if not e.level_job.is_empty(): actions.add_child(button("Cancel upgrade",func(): sim.cancel_level(e.id)))
+			elif e.level < 3:
+				var cost = sim.level_cost(e)
+				actions.add_child(button("Upgrade L%d · %d/%d" % [e.level+1,cost[0],cost[1]],func(): sim.upgrade_building(e.id)))
 	else:
 		if entities.any(func(u): return u.type == "worker"):
 			for type in ["relay","barracks","foundry","tower","hq"]:
 				var d = Catalog.get_def(type)
 				actions.add_child(button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type)))
 		else:
+			if entities.any(func(u): return u.get("support",0) > 0): actions.add_child(button("Support",func(): mode = "support"))
 			actions.add_child(button("Move",func(): mode = "move"))
 			actions.add_child(button("Attack-move",func(): mode = "attack"))
 		actions.add_child(button("Stop",func(): sim.issue(selected,{"type":"stop"})))
@@ -653,6 +771,14 @@ func test_call(args):
 			sim.issue(selected,o)
 		"build": sim.build(int(command.worker),command.type,Vector2(command.x,command.z))
 		"train": sim.enqueue(int(command.id),command.type)
+		"progression_setup": sim.players[0].alloy = 5000; sim.players[0].energy = 5000
+		"support_setup":
+			var healer = sim.own(0).filter(func(e): return e.type == "medic")[0]
+			var ally = sim.own(0).filter(func(e): return e.type == "ranger")[0]
+			healer.p = Vector2(-15,14); healer.orders.clear()
+			ally.p = Vector2(-12,14); ally.hp = 20
+			selected = [healer.id]
+			view.focus = Vector2(-16,18); view.zoom = 32
 		"restart": restart_match()
 		"camera": view.focus = Vector2(command.x,command.z); view.zoom = command.get("zoom",44)
 		"reveal": sim.visible[0].fill(1); sim.explored[0].fill(1); sim.vision_clock = 9999
@@ -673,13 +799,17 @@ func publish_state():
 	var list = []
 	for e in sim.entities+sim.deposits:
 		var point = view.camera.unproject_position(Vector3(e.p.x,1.2,e.p.y))
-		list.append({"id":e.id,"type":e.type,"team":e.get("team",-1),"x":e.p.x,"z":e.p.y,"screen":[point.x,point.y],"hp":e.get("hp",0),"amount":e.get("amount",0),"complete":e.get("complete",true),"orders":e.get("orders",[]).map(func(o): return o.type),"queue":e.get("queue",[]).map(func(q): return q.type)})
+		list.append({"id":e.id,"type":e.type,"team":e.get("team",-1),"x":e.p.x,"z":e.p.y,"screen":[point.x,point.y],"hp":e.get("hp",0),"shield":e.get("shield",0),"level":e.get("level",1),"upgrading":not e.get("level_job",{}).is_empty(),"amount":e.get("amount",0),"complete":e.get("complete",true),"orders":e.get("orders",[]).map(func(o): return o.type),"queue":e.get("queue",[]).map(func(q): return q.type)})
 	var buttons = []
 	collect_buttons(ui,buttons)
 	var state = {"ready":true,"started":started,"paused":paused,"result":sim.result,"time":sim.time,"selected":selected,"population":sim.population(0),"alloy":sim.players[0].alloy,"energy":sim.players[0].energy,"entities":list,"buttons":buttons,"settings":settings,"settings_open":is_instance_valid(settings_panel),"models":view.objects.size(),"focus":[view.focus.x,view.focus.y],"zoom":view.zoom,"mode":mode,"viewport":[ui.size.x,ui.size.y]}
 	state.last_key = last_key
 	state.groups = groups
 	state.notice = notice.text
+	state.selection_info = info_label.text
+	state.guide_open = is_instance_valid(guide_panel)
+	state.tech_level = sim.tech_level(0)
+	state.action_rect = [action_scroll.global_position.x,action_scroll.global_position.y,action_scroll.size.x,action_scroll.size.y]
 	state.ui_action_serial = ui_action_serial
 	state.building_probes = sim.own(0).filter(func(e): return e.kind == "building").map(func(e):
 		var point = view.camera.unproject_position(Vector3(e.p.x+minf(2,e.radius*0.7),2.6,e.p.y))

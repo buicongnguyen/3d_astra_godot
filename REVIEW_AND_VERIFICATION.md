@@ -60,3 +60,7 @@ Building selection now tests camera rays against cached model-part bounds instea
 Construction requirements are checked when choosing a building and again when confirming the site. Messages name a missing or unfinished prerequisite and list exact alloy/energy shortages. Invalid confirmations explain that a site or Harvester is required; failed construction feedback remains visible until the site changes. Mobile notices have space for the full warning.
 
 Verification: 47 simulation checks pass, asset/UI regressions pass, and desktop/touch export tests pass with a real resource-shortage screenshot. Test snapshots now publish after Godot's deferred layout, and button tests wait for processed actions rather than fixed delays.
+
+## Unit information and progression follow-up (2026-09-08)
+
+See PROGRESSION_PLAN.md for the implemented rules, balance tables and three review passes. Verification now includes 47 existing simulation checks plus 37 progression checks, all 11 entity models and 30 unit clips, native UI checks, and desktop/touch browser upgrade and support interactions. Web and Windows exports and the Windows headless smoke check completed locally. GitHub Actions repeats the logic, import, export and browser suites before deployment.

@@ -81,6 +81,31 @@ for(const mobile of [false,true]){
    await page.mouse.move(500,260);await page.mouse.wheel(0,550);await page.waitForTimeout(350);await press('Cancel');await press('Resume');
    await page.setViewportSize({width:390,height:844});await page.waitForTimeout(400);
  }
+ // Progress through the real upgrade and production controls on both input modes.
+ await cmd({action:'progression_setup'});
+ await cmd({action:'select',ids:[hq.id]});
+ assert.match((await state()).selection_info,/Shield.*ATK/);
+ await press('Info & stats');assert.equal((await state()).guide_open,true);
+ const guideTime=(await state()).time;await page.waitForTimeout(180);assert.equal((await state()).time,guideTime);
+ await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-field-guide.png`});
+ await press('Close field guide');assert.equal((await state()).paused,false);
+ await press('Upgrade L2 · 200/100');assert.equal((await state()).entities.find(e=>e.id===hq.id).upgrading,true);
+ await press('Cancel upgrade');assert.equal((await state()).entities.find(e=>e.id===hq.id).upgrading,false);
+ await press('Upgrade L2 · 200/100');await cmd({action:'step',seconds:21});assert.equal((await state()).tech_level,2);
+ await cmd({action:'select',ids:[production.id]});
+ await press('Medic · 100/50');assert.match((await state()).notice,/Upgrade Barracks to level 2/);
+ await press('Upgrade L2 · 100/50');await cmd({action:'step',seconds:21});
+ await press('Medic · 100/50');await cmd({action:'step',seconds:13});
+ assert.ok((await state()).entities.some(e=>e.type==='medic'&&e.team===0));
+ await cmd({action:'support_setup'});
+ const ally=(await state()).entities.find(e=>e.type==='ranger'&&e.team===0);
+ await press('Support');
+ if(mobile)await page.touchscreen.tap(...ally.screen);else await page.mouse.click(...ally.screen);
+ await page.waitForFunction(()=>window.frontierState.entities.some(e=>e.type==='medic'&&e.orders[0]==='support'));
+ await cmd({action:'step',seconds:2});assert.ok((await state()).entities.find(e=>e.id===ally.id).hp>20);
+ await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-medic-support.png`});
+ await cmd({action:'select',ids:[hq.id]});
+ await press('Upgrade L3 · 350/175');await cmd({action:'step',seconds:31});assert.equal((await state()).tech_level,3);
  await cmd({action:'camera',x:-20,z:18,zoom:48});
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-game.png`});
  await cmd({action:'outcome',team:1});assert.equal((await state()).result,'victory');

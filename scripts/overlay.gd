@@ -5,10 +5,14 @@ func _draw():
 	if not game or not game.view: return
 	for e in game.sim.entities:
 		if e.team != 0 and not game.sim.seen(e.p): continue
-		if not game.selected.has(e.id) and e.hp >= e.max_hp: continue
+		if e.hp <= 0: continue
+		if not game.selected.has(e.id) and e.hp >= e.max_hp and e.shield >= e.max_shield: continue
 		var point = game.view.camera.unproject_position(Vector3(e.p.x,3.2 if e.kind == "unit" else 5,e.p.y))
 		draw_rect(Rect2(point-Vector2(20,0),Vector2(40,4)),Color("15282b"))
 		draw_rect(Rect2(point-Vector2(20,0),Vector2(40*clampf(e.hp/e.max_hp,0,1),4)),game.view.colors[e.team])
+		if e.max_shield > 0:
+			draw_rect(Rect2(point-Vector2(20,6),Vector2(40,3)),Color("15282b"))
+			draw_rect(Rect2(point-Vector2(20,6),Vector2(40*clampf(e.shield/e.max_shield,0,1),3)),Color("69cbee"))
 	if game.dragging and not game.touch_active and game.mode == "":
 		var rect = Rect2(game.pointer_start,game.pointer_now-game.pointer_start).abs()
 		draw_rect(rect,Color(0.5,0.9,0.75,0.1))

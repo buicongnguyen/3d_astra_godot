@@ -125,6 +125,7 @@ func run():
 	check(sim.players[0].upgrade and not sim.enqueue(foundry.id,"upgrade"),"research applies once")
 	var ranger = first(sim,"ranger")
 	var enemy_hq = first(sim,"hq",1)
+	enemy_hq.shield = 0 # Isolate the research HP damage assertion from shield absorption.
 	old = enemy_hq.hp
 	sim.hit(ranger,enemy_hq)
 	check(is_equal_approx(old-enemy_hq.hp,13.2),"research updates existing combat units")

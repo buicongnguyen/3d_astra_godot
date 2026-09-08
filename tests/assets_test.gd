@@ -28,7 +28,14 @@ func run():
 	await process_frame
 	game.start_match()
 	game.sim.ai_enabled = false
+	game.show_guide("barracks")
+	verify(game.paused and game.guide_text("barracks").contains("Medics"),"field guide pauses match and explains building unlocks")
+	game.close_guide()
+	verify(not game.paused,"closing field guide restores running match")
 	game.toggle_pause()
+	game.show_guide("engineer")
+	game.close_guide()
+	verify(game.paused,"closing field guide preserves an existing pause")
 	game.show_settings()
 	game.close_settings()
 	verify(game.paused and game.modal.visible,"closing settings preserves pause")

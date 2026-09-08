@@ -50,7 +50,7 @@ func resource(type: String,p: Vector2,amount: int):
 
 func spawn(type: String,team: int,p: Vector2,complete: bool = true) -> Dictionary:
 	var e = Catalog.get_def(type).duplicate(true)
-	e.merge({"type":type,"id":next_id,"team":team,"p":p,"max_hp":e.hp,"hp":e.hp if complete else 1.0,"complete":complete,"progress":1.0 if complete else 0.0,"orders":[],"path":[],"path_clock":0.0,"revision":-1,"cooldown":0.0,"carry":0,"carry_type":"","resource":0,"queue":[],"rally":null,"angle":0.0,"moving":false,"work":0.0,"stalled":0.0,"builder":0},true)
+	e.merge({"type":type,"id":next_id,"team":team,"p":p,"max_hp":e.hp,"hp":e.hp if complete else 1.0,"complete":complete,"progress":1.0 if complete else 0.0,"orders":[],"path":[],"path_clock":0.0,"revision":-1,"cooldown":0.0,"carry":0,"carry_type":"","resource":0,"queue":[],"rally":null,"angle":0.0,"moving":false,"work":0.0,"stalled":0.0,"builder":0,"level":1,"max_shield":e.get("shield",0),"shield":e.get("shield",0) if complete else 0.0,"shield_delay":0.0,"level_job":{}},true)
 	next_id += 1
 	entities.append(e)
 	return e
@@ -102,7 +102,7 @@ func update_vision():
 						explored[team][y*48+x] = 1
 
 func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
-	if result != "" or not order.get("type","") in ["move","attackmove","attack","gather","deliver","build","stop"]: return
+	if result != "" or not order.get("type","") in ["move","attackmove","attack","gather","deliver","build","support","stop"]: return
 	if order.type in ["move","attackmove"] and (not order.get("p") is Vector2 or not order.p.is_finite()): return
 	var units = []
 	for id in ids:
@@ -116,6 +116,10 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 		if order.type in ["gather","deliver","build"] and e.type != "worker": continue
 		if order.type == "gather" and (target.is_empty() or target.kind != "resource"): continue
 		if order.type == "build" and (target.is_empty() or target.get("team",-1) != team or target.kind != "building" or target.complete): continue
+		if order.type == "support" and not support_valid(e,target): continue
+		if order.type == "attack" and e.get("support",0) > 0:
+			feedback(e.name+" cannot attack. Use Support on a friendly target.",team)
+			continue
 		var o = order.duplicate()
 		if o.type in ["move","attackmove"] and units.size() > 1:
 			o.p += Vector2((i%side)-(side-1)*0.5,floori(float(i)/side)-(side-1)*0.5)*2.1
@@ -131,21 +135,31 @@ func enqueue(id: int,type: String,team: int = 0) -> bool:
 	var b = entity(id)
 	var d = Catalog.get_def(type)
 	if result != "" or b.is_empty() or b.get("team",-1) != team or not b.complete or not type in b.get("trains",[]) or d.is_empty(): return false
+	if not b.level_job.is_empty():
+		feedback("Finish or cancel the building upgrade before training.",team)
+		return false
+	if b.level < d.get("required_level",1):
+		feedback("Upgrade %s to level %d to train %s." % [b.name,d.required_level,d.name],team)
+		return false
 	if b.queue.size() >= 5:
 		feedback("Production queue is full.",team)
 		return false
+	if type == "upgrade":
+		if players[team].upgrade:
+			feedback("Overcharged weapons is already researched.",team)
+			return false
+		for e in own(team):
+			for q in e.queue:
+				if q.type == "upgrade":
+					feedback("Overcharged weapons is already queued.",team)
+					return false
 	if not can_pay(team,d.cost):
-		feedback("Insufficient resources. Assign more Harvesters.",team)
+		feedback(resource_shortage(d.cost,team)+" to train/research "+d.name+".",team)
 		return false
 	var p = population(team)
 	if d.get("pop",0) > 0 and p.used+p.reserved+d.get("pop",0) > p.cap:
 		feedback("Supply limit: construct a Relay.",team)
 		return false
-	if type == "upgrade":
-		if players[team].upgrade: return false
-		for e in own(team):
-			for q in e.queue:
-				if q.type == "upgrade": return false
 	pay(team,d.cost)
 	b.queue.append({"type":type,"elapsed":0.0,"blocked":""})
 	return true
@@ -156,6 +170,90 @@ func cancel_queue(id: int,index: int,team: int = 0) -> bool:
 	pay(team,Catalog.get_def(b.queue[index].type).cost,-1)
 	b.queue.remove_at(index)
 	return true
+
+func resource_shortage(cost: Array,team: int) -> String:
+	var missing = []
+	if players[team].alloy < cost[0]: missing.append("%d alloy" % ceili(cost[0]-players[team].alloy))
+	if players[team].energy < cost[1]: missing.append("%d energy" % ceili(cost[1]-players[team].energy))
+	return "Need "+" and ".join(missing)+" more"
+
+func tech_level(team: int) -> int:
+	var level = 1
+	for e in own(team):
+		if e.type == "hq" and e.complete: level = maxi(level,e.level)
+	return level
+
+func level_cost(b: Dictionary) -> Array:
+	return [200,100] if b.type == "hq" and b.level == 1 else ([350,175] if b.type == "hq" else [100*b.level,50*b.level])
+
+func upgrade_building(id: int,team: int = 0) -> bool:
+	var b = entity(id)
+	if result != "" or b.is_empty() or b.get("team",-1) != team or b.kind != "building" or not b.complete: return false
+	if b.level >= 3:
+		feedback("This building is already at maximum level 3.",team)
+		return false
+	if not b.level_job.is_empty() or not b.queue.is_empty():
+		feedback("Finish or cancel current production/upgrade first.",team)
+		return false
+	if b.type != "hq" and tech_level(team) < b.level+1:
+		feedback("Upgrade a Command core to level %d first." % (b.level+1),team)
+		return false
+	var cost = level_cost(b)
+	if not can_pay(team,cost):
+		feedback(resource_shortage(cost,team)+" to upgrade "+b.name+".",team)
+		return false
+	pay(team,cost)
+	b.level_job = {"elapsed":0.0,"time":20.0 if b.level == 1 else 30.0,"cost":cost.duplicate()}
+	feedback("%s upgrading to level %d." % [b.name,b.level+1],team)
+	return true
+
+func cancel_level(id: int,team: int = 0) -> bool:
+	var b = entity(id)
+	if result != "" or b.is_empty() or b.get("team",-1) != team or b.level_job.is_empty(): return false
+	pay(team,b.level_job.cost,-1)
+	b.level_job = {}
+	return true
+
+func update_level(b: Dictionary,dt: float):
+	if b.level_job.is_empty(): return
+	b.level_job.elapsed += dt
+	if b.level_job.elapsed < b.level_job.time: return
+	b.level += 1
+	var base = Catalog.get_def(b.type)
+	var previous_max = b.max_hp
+	b.max_hp = base.hp*(1+0.25*(b.level-1))
+	b.hp += b.max_hp-previous_max
+	b.max_shield = base.shield+25*(b.level-1)
+	if b.has("supply"): b.supply = base.supply+(5*(b.level-1) if b.type == "relay" else 0)
+	if b.has("damage"): b.damage = base.damage*(1+0.25*(b.level-1))
+	b.level_job = {}
+	feedback("%s reached level %d." % [b.name,b.level],b.team)
+
+func support_valid(e: Dictionary,t: Dictionary) -> bool:
+	if e.get("support",0) <= 0 or t.is_empty() or t.get("team",-1) != e.team or t.id == e.id or t.get("hp",0) <= 0 or not t.complete: return false
+	return (t.kind == "unit" and t.type != "breaker") if e.type == "medic" else (t.kind == "building" or t.type == "breaker")
+
+func support_target(e: Dictionary) -> Dictionary:
+	var best = {}
+	var ratio = 1.0
+	for t in entities:
+		if support_valid(e,t) and t.hp/t.max_hp < ratio and e.p.distance_to(t.p) <= e.range+t.radius and nav.clear_line(e.p,t.p,e.id,t.id):
+			best = t
+			ratio = t.hp/t.max_hp
+	return best
+
+func assist(e: Dictionary,t: Dictionary,dt: float,chase: bool = false) -> bool:
+	if not support_valid(e,t): return false
+	if e.p.distance_to(t.p) > e.range+t.radius or not nav.clear_line(e.p,t.p,e.id,t.id):
+		if chase: move(e,approach(e,t,maxf(1.4,e.range*0.7)),dt)
+	elif t.hp < t.max_hp and e.cooldown <= 0:
+		t.hp = minf(t.max_hp,t.hp+e.support)
+		e.cooldown = e.interval
+		events.append({"type":"support","p":e.p,"to":t.p,"team":e.team})
+	return true
+
+func attack_value(e: Dictionary) -> float:
+	return e.get("damage",0)*(1.1 if players[e.team].upgrade and e.kind == "unit" and e.type != "worker" else 1.0)
 
 func construction_requirements(type: String,team: int = 0) -> String:
 	var d = Catalog.get_def(type)
@@ -267,15 +365,18 @@ func enemy(e: Dictionary,radius: float) -> Dictionary:
 
 func apply_damage(t: Dictionary,damage: float,team: int):
 	if t.hp <= 0: return
-	t.hp -= damage
+	if damage <= 0: return
+	t.shield_delay = 5.0
+	var absorbed = minf(t.shield,damage)
+	t.shield -= absorbed
+	t.hp -= damage-absorbed
 	if t.hp <= 0:
 		players[team].kills += 1
 		events.append({"type":"death","p":t.p,"team":t.team})
 		if t.kind == "building": nav.rebuild(entities)
 
 func hit(e: Dictionary,t: Dictionary):
-	var damage = e.damage*(1.6 if e.get("counter","") == t.type else 1.0)
-	if players[e.team].upgrade and e.kind == "unit" and e.type != "worker": damage *= 1.1
+	var damage = attack_value(e)*(1.6 if e.get("counter","") == t.type else 1.0)
 	apply_damage(t,damage,e.team)
 	if e.type == "breaker":
 		for other in entities:
@@ -284,7 +385,7 @@ func hit(e: Dictionary,t: Dictionary):
 	e.cooldown = e.interval
 
 func fight(e: Dictionary,t: Dictionary,dt: float,chase: bool = true) -> bool:
-	if t.is_empty() or t.get("hp",0) <= 0 or t.team == e.team or not seen(t.p,e.team): return false
+	if e.get("damage",0) <= 0 or t.is_empty() or t.get("hp",0) <= 0 or t.team == e.team or not seen(t.p,e.team): return false
 	if e.p.distance_to(t.p) <= e.range+t.radius and nav.clear_line(e.p,t.p,e.id,t.id):
 		e.angle = atan2(t.p.x-e.p.x,t.p.y-e.p.y)
 		if e.cooldown <= 0: hit(e,t)
@@ -349,10 +450,10 @@ func update_worker(e: Dictionary,o: Dictionary,dt: float):
 		else: finish(e)
 
 func update_production(b: Dictionary,dt: float):
-	if not b.complete or b.queue.is_empty(): return
+	if not b.complete or not b.level_job.is_empty() or b.queue.is_empty(): return
 	var q = b.queue[0]
 	var d = Catalog.get_def(q.type)
-	q.elapsed += dt
+	q.elapsed += dt*(1+0.2*(b.level-1))
 	if q.elapsed < d.time: return
 	if q.type == "upgrade":
 		players[b.team].upgrade = true
@@ -400,13 +501,22 @@ func update_ai():
 					built = true
 					break
 			if built: break
+	if time > 160 and not headquarters.is_empty() and workers.size() >= 9:
+		var core = headquarters[0]
+		if core.level < (3 if time > 300 else 2) and core.queue.is_empty(): upgrade_building(core.id,1)
 	for b in units:
+		if b.complete and b.type in ["barracks","foundry"] and b.level < tech_level(1) and time > 190:
+			if b.queue.is_empty(): upgrade_building(b.id,1)
+			continue
 		if b.complete and b.type in ["barracks","foundry"] and b.queue.size() < 2:
-			enqueue(b.id,"breaker" if b.type == "foundry" else ("vanguard" if floori(time/4)%3 == 0 else "ranger"),1)
+			var choice = "breaker" if b.type == "foundry" else ("vanguard" if floori(time/4)%3 == 0 else "ranger")
+			var support_type = "engineer" if b.type == "foundry" else "medic"
+			if b.level >= 2 and army.filter(func(e): return e.type == support_type).size() < 2: choice = support_type
+			enqueue(b.id,choice,1)
 	var threat = {}
 	if not headquarters.is_empty(): threat = enemy(headquarters[0],25)
 	if not threat.is_empty():
-		issue(army.filter(func(e): return e.orders.is_empty() or e.orders[0].type != "attack").map(func(e): return e.id),{"type":"attack","target":threat.id},false,1)
+		issue(army.filter(func(e): return e.get("damage",0) > 0 and (e.orders.is_empty() or e.orders[0].type != "attack")).map(func(e): return e.id),{"type":"attack","target":threat.id},false,1)
 	elif time >= wave_at and army.size() >= 4:
 		issue(army.map(func(e): return e.id),{"type":"attackmove","p":Vector2(-25,24)},false,1)
 		wave_at = time+50
@@ -421,10 +531,25 @@ func tick(dt: float):
 	for e in entities.duplicate():
 		if e.hp <= 0: continue
 		e.cooldown -= dt
+		e.shield_delay = maxf(0,e.shield_delay-dt)
+		if e.complete and e.shield_delay <= 0: e.shield = minf(e.max_shield,e.shield+4*dt)
 		e.moving = false
 		if e.kind == "building":
+			update_level(e,dt)
 			update_production(e,dt)
 			if e.complete and e.has("damage"): fight(e,enemy(e,e.range),dt,false)
+			continue
+		if e.get("support",0) > 0:
+			if e.orders.is_empty(): assist(e,support_target(e),dt)
+			else:
+				var command = e.orders[0]
+				if command.type == "support":
+					if not assist(e,entity(command.target),dt,true): finish(e)
+				elif command.type in ["move","attackmove"]:
+					var ally = support_target(e) if command.type == "attackmove" else {}
+					if not ally.is_empty(): assist(e,ally,dt)
+					elif move(e,command.p,dt,1.1): finish(e)
+				else: finish(e)
 			continue
 		if e.orders.is_empty():
 			if e.type != "worker": fight(e,enemy(e,e.range+2),dt,false)

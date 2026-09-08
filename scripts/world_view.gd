@@ -245,6 +245,15 @@ func create_entity(e: Dictionary):
 	ring.position.y = 0.12
 	ring.material_override = material(colors[e.team],true)
 	root.add_child(ring)
+	if e.kind == "building":
+		var badge = Label3D.new()
+		badge.name = "LevelBadge"
+		badge.position.y = 5.5
+		badge.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		badge.font_size = 48
+		badge.pixel_size = 0.015
+		badge.modulate = colors[e.team]
+		root.add_child(badge)
 	var animation = find_animation(model)
 	if animation:
 		for clip in animation.get_animation_list():
@@ -326,8 +335,11 @@ func refresh(dt: float):
 		o.model.rotation.y = e.angle
 		o.model.scale = Vector3.ONE*(0.25+0.75*e.progress)
 		o.ring.visible = selected.has(e.id)
+		if e.kind == "building":
+			o.root.get_node("LevelBadge").text = "L%d" % e.level
+			o.root.get_node("LevelBadge").modulate = colors[e.team]
 		if o.animation:
-			var clip = "Walk" if e.moving else ("Attack" if e.cooldown > 0.1 else ("Work" if not e.orders.is_empty() and e.orders[0].type in ["gather","build"] else "Idle"))
+			var clip = "Walk" if e.moving else (("Work" if e.get("support",0) > 0 else "Attack") if e.cooldown > 0.1 else ("Work" if not e.orders.is_empty() and e.orders[0].type in ["gather","build"] else "Idle"))
 			if o.clip != clip:
 				o.animation.play(clip,0.1)
 				o.clip = clip
@@ -354,10 +366,10 @@ func refresh(dt: float):
 		fog_clock = 0.25
 	for event in sim.events:
 		if not sim.seen(event.p): continue
-		if event.type == "shot":
+		if event.type in ["shot","support"]:
 			var a = Vector3(event.p.x,1.2,event.p.y)
 			var b = Vector3(event.to.x,1.2,event.to.y)
-			var line = box(self,(a+b)*0.5,Vector3(0.075,0.075,a.distance_to(b)),colors[event.team])
+			var line = box(self,(a+b)*0.5,Vector3(0.075,0.075,a.distance_to(b)),Color("76f2c4") if event.type == "support" else colors[event.team])
 			if a.distance_to(b) > 0.001: line.look_at(b)
 			effects.append({"node":line,"life":0.12})
 	sim.events.clear()

@@ -13,6 +13,8 @@ Choose Meridian Riverlands or Ashen Frontier, customize army colors if desired, 
 - Desktop: click/drag selection, right-click orders, WASD/arrows to pan, wheel or +/− to zoom, middle drag to pan. Q attack-move, X stop, H home, F focus selection. Shift queues orders. Shift + 1–9 assigns groups; 1–9 recalls. Ctrl + number also works in the native build where the OS does not intercept it.
 - Touch: tap friendly entities to select; tap a resource/enemy/ground to issue a contextual order. Drag pans; pinch zooms. Use Move/Attack-move buttons for explicit orders. Construction uses a ground tap followed by Confirm site.
 - Buildings: select to train units, cancel queued production, or cancel an unfinished site for a 75% refund. Right-click ground sets a rally point.
+- Info & stats: select any unit or building to read its function, costs and combat stats. The roster has six units: Harvester, Vanguard, Ranger, Breaker, Medic and Engineer. Medics heal infantry; Engineers repair completed buildings and Breakers. Use Support → friendly target, or keep them near injured allies for automatic support.
+- Technology: upgrade the Command core, then other buildings, through three levels. Level 2 Barracks unlocks Medics; level 2 Foundry unlocks Engineers. Level 3 strengthens the base and production. See the [progression plan and balance tables](PROGRESSION_PLAN.md) for exact costs and effects. Shields absorb damage before HP and regenerate after five seconds without damage.
 - Settings: briefing or Pause → Army & graphics settings. Different army colors, Eco shadows, vegetation, water motion, and command sound mute are saved locally. Pause freezes gameplay and animated units; Settings retains the previous pause state.
 
 ## Run or edit
@@ -30,6 +32,7 @@ Use the same version as CI for reproducibility. Godot uses the Compatibility ren
 ```powershell
 & $env:GODOT --headless --editor --path . --import
 & $env:GODOT --headless --path . --script res://tests/simulation_test.gd
+& $env:GODOT --headless --path . --script res://tests/progression_test.gd
 & $env:GODOT --headless --path . --script res://tests/assets_test.gd
 & $env:GODOT --headless --path . --export-release Web
 & $env:GODOT --headless --path . --export-release Windows
@@ -54,7 +57,7 @@ The Windows output is `build/windows/FrontierCommand.exe`. CI also preserves it 
 & $env:BLENDER --background --python tools/blender/animate_units.py
 ```
 
-One world unit is one meter. GLBs use Y-up and ground-centered origins. Team and TeamGlow material names identify paint regions. Four mechanical units have Idle, Walk, Work, Attack, and Death clips authored in Blender using rigid articulated parts. Godot plays these through AnimationPlayer. These are original assets, with no external model or animation downloads.
+One world unit is one meter. GLBs use Y-up and ground-centered origins. Team and TeamGlow material names identify paint regions. Six mechanical units have Idle, Walk, Work, Attack, and Death clips authored in Blender using rigid articulated parts. Godot plays these through AnimationPlayer. These are original assets, with no external model or animation downloads.
 
 ## Architecture and deployment
 

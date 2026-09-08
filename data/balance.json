@@ -18,7 +18,8 @@
       "pop": 1,
       "time": 8,
       "icon": "worker",
-      "description": "Collects resources and constructs your outpost."
+      "description": "Collects resources and constructs your outpost.",
+      "shield": 10
     },
     "vanguard": {
       "name": "Vanguard",
@@ -39,7 +40,8 @@
       "time": 10,
       "icon": "shield",
       "counter": "ranger",
-      "description": "Fast armored fighter. Strong against Rangers."
+      "description": "Fast armored fighter. Strong against Rangers.",
+      "shield": 60
     },
     "ranger": {
       "name": "Ranger",
@@ -60,7 +62,8 @@
       "time": 13,
       "icon": "crosshair",
       "counter": "breaker",
-      "description": "Long-range precision. Strong against Breakers."
+      "description": "Long-range precision. Strong against Breakers.",
+      "shield": 25
     },
     "breaker": {
       "name": "Breaker",
@@ -80,7 +83,8 @@
       "pop": 3,
       "time": 20,
       "icon": "tank",
-      "description": "Heavy splash damage against clustered infantry."
+      "description": "Heavy splash damage against clustered infantry.",
+      "shield": 80
     },
     "hq": {
       "name": "Command core",
@@ -99,7 +103,8 @@
         "worker"
       ],
       "icon": "hq",
-      "description": "Your foothold on the frontier. Trains Harvesters and receives resources."
+      "description": "Receives resources and trains Harvesters. Provides 15 supply. Upgrade this core to unlock matching levels for other buildings. Losing every Command core loses the match.",
+      "shield": 150
     },
     "relay": {
       "name": "Supply relay",
@@ -115,7 +120,8 @@
       "time": 12,
       "supply": 10,
       "icon": "relay",
-      "description": "Expands population capacity by 10."
+      "description": "Provides 10 supply, plus 5 per upgrade level (15 at L2, 20 at L3). Army capacity is capped at 100.",
+      "shield": 40
     },
     "barracks": {
       "name": "Barracks",
@@ -131,10 +137,12 @@
       "time": 18,
       "trains": [
         "vanguard",
-        "ranger"
+        "ranger",
+        "medic"
       ],
       "icon": "barracks",
-      "description": "Trains Vanguards and Rangers. Required for the Foundry."
+      "description": "Trains Vanguards and Rangers. Level 2 unlocks Medics. Required to construct a Foundry. Upgrades accelerate production.",
+      "shield": 60
     },
     "foundry": {
       "name": "Foundry",
@@ -150,11 +158,13 @@
       "time": 25,
       "trains": [
         "breaker",
-        "upgrade"
+        "upgrade",
+        "engineer"
       ],
       "requires": "barracks",
       "icon": "foundry",
-      "description": "Produces Breakers and researches improved weapons."
+      "description": "Produces Breakers and researches +10% combat-unit damage. Level 2 unlocks Engineers. Upgrades accelerate production.",
+      "shield": 90
     },
     "tower": {
       "name": "Sentinel tower",
@@ -172,7 +182,8 @@
       "interval": 1.2,
       "range": 13,
       "icon": "tower",
-      "description": "Automatically engages visible enemies in range."
+      "description": "Automatically attacks visible enemies within range. Each upgrade adds 25% of its base attack damage.",
+      "shield": 50
     },
     "upgrade": {
       "name": "Overcharged weapons",
@@ -185,6 +196,50 @@
       "pop": 0,
       "icon": "bolt",
       "description": "One-time +10% damage for all combat units."
+    },
+    "medic": {
+      "name": "Medic",
+      "role": "Infantry healing",
+      "kind": "unit",
+      "hp": 75,
+      "shield": 30,
+      "speed": 4.3,
+      "damage": 0,
+      "interval": 1,
+      "range": 6,
+      "radius": 0.6,
+      "vision": 14,
+      "cost": [
+        100,
+        50
+      ],
+      "pop": 1,
+      "time": 15,
+      "required_level": 2,
+      "support": 12,
+      "description": "Automatically heals nearby friendly infantry (including Harvesters and Engineers), excluding itself. Cannot attack. Use Support, then select an ally to follow and heal."
+    },
+    "engineer": {
+      "name": "Engineer",
+      "role": "Mechanical repair",
+      "kind": "unit",
+      "hp": 100,
+      "shield": 30,
+      "speed": 4.3,
+      "damage": 0,
+      "interval": 1,
+      "range": 6,
+      "radius": 0.6,
+      "vision": 14,
+      "cost": [
+        125,
+        50
+      ],
+      "pop": 1,
+      "time": 15,
+      "required_level": 2,
+      "support": 18,
+      "description": "Automatically repairs nearby completed buildings and Breakers. Cannot construct, gather, or attack. Use Support, then select a repair target."
     }
   },
   "rocks": [
