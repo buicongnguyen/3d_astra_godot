@@ -571,13 +571,15 @@ func context_order(screen: Vector2,attack: bool = false):
 	if ids.is_empty():
 		for id in selected:
 			var b = sim.entity(id)
-			if not b.is_empty() and b.kind == "building": b.rally = p.clamp(Vector2(-45,-45),Vector2(45,45))
+			if not b.is_empty() and b.kind == "building":
+				b.rally = p.clamp(Vector2.ONE*(-sim.nav.half+3),Vector2.ONE*(sim.nav.half-3))
+				sim.message = "Rally point set. New units will move here."
 		return
 	var order = {"type":"attackmove" if attack else "move","p":p}
 	if mode == "support":
 		var helpers = ids.filter(func(id): return sim.entity(id).get("support",0) > 0)
 		if target.is_empty() or not helpers.any(func(id): return sim.support_valid(sim.entity(id),target)):
-			sim.message = "Choose friendly infantry for a Medic, or a completed building / Breaker for an Engineer."
+			sim.message = "Medic: select allied infantry. Engineer: select a completed building or vehicle."
 			return
 		sim.issue(helpers,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
 		mode = ""
@@ -880,7 +882,7 @@ func publish_state():
 	var list = []
 	for e in sim.entities+sim.deposits:
 		var point = view.camera.unproject_position(Vector3(e.p.x,1.2,e.p.y))
-		list.append({"id":e.id,"type":e.type,"team":e.get("team",-1),"x":e.p.x,"z":e.p.y,"screen":[point.x,point.y],"hp":e.get("hp",0),"shield":e.get("shield",0),"level":e.get("level",1),"upgrading":not e.get("level_job",{}).is_empty(),"amount":e.get("amount",0),"complete":e.get("complete",true),"orders":e.get("orders",[]).map(func(o): return o.type),"queue":e.get("queue",[]).map(func(q): return q.type)})
+		list.append({"id":e.id,"type":e.type,"team":e.get("team",-1),"x":e.p.x,"z":e.p.y,"screen":[point.x,point.y],"hp":e.get("hp",0),"shield":e.get("shield",0),"level":e.get("level",1),"upgrading":not e.get("level_job",{}).is_empty(),"amount":e.get("amount",0),"complete":e.get("complete",true),"orders":e.get("orders",[]).map(func(o): return o.type),"rally":[e.rally.x,e.rally.y] if e.get("rally") is Vector2 else null,"queue":e.get("queue",[]).map(func(q): return q.type)})
 	var buttons = []
 	collect_buttons(ui,buttons)
 	var state = {"ready":true,"started":started,"paused":paused,"result":sim.result,"time":sim.time,"selected":selected,"population":sim.population(0),"alloy":sim.players[0].alloy,"energy":sim.players[0].energy,"entities":list,"buttons":buttons,"settings":settings,"settings_open":is_instance_valid(settings_panel),"models":view.objects.size(),"focus":[view.focus.x,view.focus.y],"zoom":view.zoom,"mode":mode,"viewport":[ui.size.x,ui.size.y]}

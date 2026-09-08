@@ -37,6 +37,7 @@ jobs:
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/progression_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/heavy_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/expansion_test.gd
+          Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/review_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/assets_test.gd
       - name: Export Web and Windows
         run: |

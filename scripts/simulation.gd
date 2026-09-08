@@ -137,7 +137,7 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 		var o = order.duplicate()
 		if o.type in ["move","attackmove"] and units.size() > 1:
 			o.p += Vector2((i%side)-(side-1)*0.5,floori(float(i)/side)-(side-1)*0.5)*2.1
-			o.p = o.p.clamp(Vector2(-45,-45),Vector2(45,45))
+			o.p = o.p.clamp(Vector2.ONE*(-nav.half+3),Vector2.ONE*(nav.half-3))
 		if not append or o.type == "stop":
 			e.orders.clear()
 			e.path.clear()
@@ -510,7 +510,7 @@ func update_ai():
 		var built = false
 		for radius in [10,17,23]:
 			for i in range(12):
-				var p = Vector2(25+map_config.offset,-24-map_config.offset)+Vector2(cos(float(i)/12*TAU),sin(float(i)/12*TAU))*radius
+				var p = (headquarters[0].p if not headquarters.is_empty() else Vector2(25+map_config.offset,-24-map_config.offset))+Vector2(cos(float(i)/12*TAU),sin(float(i)/12*TAU))*radius
 				if placement(want,p,1) == "" and not build(workers[0].id,want,p,1).is_empty():
 					built = true
 					break
@@ -519,7 +519,8 @@ func update_ai():
 		var core = headquarters[0]
 		if core.level < (3 if time > 300 else 2) and core.queue.is_empty(): upgrade_building(core.id,1)
 	for b in units:
-		if b.complete and b.type in ["barracks","foundry"] and b.level < tech_level(1) and time > 190:
+		if not b.get("level_job",{}).is_empty(): continue
+		if b.complete and b.type in ["barracks","foundry"] and b.level < tech_level(1) and time > 190 and can_pay(1,level_cost(b)):
 			if b.queue.is_empty(): upgrade_building(b.id,1)
 			continue
 		if b.complete and b.type in ["barracks","foundry"] and b.queue.size() < 2:
@@ -528,7 +529,15 @@ func update_ai():
 			if b.type == "barracks" and b.level >= 2 and army.filter(func(e): return e.type == "antitank").size() < 3: choice = "antitank"
 			var support_type = "engineer" if b.type == "foundry" else "medic"
 			if b.level >= 2 and army.filter(func(e): return e.type == support_type).size() < 2: choice = support_type
-			enqueue(b.id,choice,1)
+			var choices = [choice]
+			for fallback in (["ranger","vanguard"] if b.type == "barracks" else ["breaker"]):
+				if not fallback in choices: choices.append(fallback)
+			var capacity = population(1)
+			for type in choices:
+				var d = Catalog.get_def(type)
+				if b.level >= d.get("required_level",1) and can_pay(1,d.cost) and capacity.used+capacity.reserved+d.pop <= capacity.cap:
+					enqueue(b.id,type,1)
+					break
 	var threat = {}
 	if not headquarters.is_empty(): threat = enemy(headquarters[0],25)
 	if not threat.is_empty():

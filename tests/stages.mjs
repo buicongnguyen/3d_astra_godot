@@ -26,6 +26,14 @@ try{
     const s=await page.evaluate(()=>window.frontierState);assert.equal(s.map_size,size);
     assert.equal(s.entities.filter(e=>e.type==='alloy'||e.type==='energy').length,12+sites*6);
     assert.ok(Math.abs(s.focus[0]-(-20-offset))<2);
+    if(id==='expanse'){
+     const b=s.entities.find(e=>e.type==='barracks'&&e.team===0);
+     await cmd({action:'select',ids:[b.id]});await cmd({action:'camera',x:-64,z:18,zoom:32});
+     const deposit=(await page.evaluate(()=>window.frontierState)).entities.find(e=>e.type==='alloy'&&e.x < -60&&e.z>10&&e.z<25);
+     if(mobile)await page.touchscreen.tap(...deposit.screen);else await page.mouse.click(...deposit.screen,{button:'right'});
+     await page.waitForFunction(id=>window.frontierState.entities.find(e=>e.id===id)?.rally?.[0]<-55,b.id);
+     await cmd({action:'select',ids:[]});
+    }
     const r=s.minimap_rect;await click(r[0]+r[2]*.9,r[1]+r[3]*.7);
     await page.waitForFunction(x=>Math.abs(window.frontierState.focus[0]-x)<2,size*.4);
     const home=(await page.evaluate(()=>window.frontierState)).buttons.find(b=>b.text==='Home');await click(home.x+home.w/2,home.y+home.h/2);
