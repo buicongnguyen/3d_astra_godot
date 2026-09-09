@@ -135,6 +135,7 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 			feedback(e.name+" cannot attack. Use Support on a friendly target.",team)
 			continue
 		var o = order.duplicate()
+		if o.type == "gather": o.resource_type = target.type
 		if o.type in ["move","attackmove"] and units.size() > 1:
 			o.p += Vector2((i%side)-(side-1)*0.5,floori(float(i)/side)-(side-1)*0.5)*2.1
 			o.p = o.p.clamp(Vector2.ONE*(-nav.half+3),Vector2.ONE*(nav.half-3))
@@ -333,11 +334,42 @@ func approach(e: Dictionary,target: Dictionary,margin: float = 1.4) -> Vector2:
 
 func finish(e: Dictionary):
 	if not e.orders.is_empty(): e.orders.pop_front()
+	reset_worker_route(e)
+	e.work = 0
+	e.moving = false
+
+func reset_worker_route(e: Dictionary):
 	e.path.clear()
 	e.path_clock = 0
 	e.stalled = 0
-	e.work = 0
-	e.moving = false
+
+func resume_gathering(e: Dictionary,o: Dictionary):
+	# Explicit queued commands take priority over automatic reassignment.
+	if e.orders.size() > 1:
+		finish(e)
+		return
+	var resource = entity(e.resource)
+	if resource.is_empty() and o.get("resource_type","") == "":
+		finish(e)
+		return
+	if resource.is_empty() or resource.kind != "resource":
+		var candidates = deposits.filter(func(r): return r.amount > 0 and r.type == o.get("resource_type","") and discovered(r.p,e.team) and e.p.distance_to(r.p) <= 30)
+		candidates.sort_custom(func(a,b): return e.p.distance_squared_to(a.p) < e.p.distance_squared_to(b.p))
+		resource = {}
+		for r in candidates:
+			var route = nav.path(e.p,approach(e,r,0.8),e.radius)
+			if not route.is_empty() and route[-1].distance_to(r.p) <= r.radius+1.4:
+				resource = r
+				break
+	if resource.is_empty():
+		feedback("No reachable nearby %s deposit. Assign this Harvester to another deposit." % o.get("resource_type","resource"),e.team)
+		finish(e)
+		return
+	e.resource = resource.id
+	o.type = "gather"
+	o.target = resource.id
+	o.resource_type = resource.type
+	reset_worker_route(e)
 
 func move(e: Dictionary,goal: Vector2,dt: float,tolerance: float = 0.25) -> bool:
 	if e.p.distance_to(goal) < tolerance:
@@ -350,7 +382,9 @@ func move(e: Dictionary,goal: Vector2,dt: float,tolerance: float = 0.25) -> bool
 		e.revision = nav.revision
 	if e.path.is_empty():
 		e.stalled += dt
-		if e.stalled > 6: finish(e)
+		if e.stalled > 6:
+			finish(e)
+			feedback(e.name+" cannot reach its destination. Order cleared.",e.team)
 		return false
 	while not e.path.is_empty() and e.p.distance_to(e.path[0]) < 0.25: e.path.pop_front()
 	if e.path.is_empty(): return true
@@ -358,7 +392,9 @@ func move(e: Dictionary,goal: Vector2,dt: float,tolerance: float = 0.25) -> bool
 	if not nav.traverse(e.p,next,e.radius):
 		e.path_clock = 0
 		e.stalled += dt
-		if e.stalled > 6: finish(e)
+		if e.stalled > 6:
+			finish(e)
+			feedback(e.name+" cannot reach its destination. Order cleared.",e.team)
 		return false
 	e.angle = atan2(next.x-e.p.x,next.y-e.p.y)
 	e.p = next
@@ -426,16 +462,23 @@ func update_worker(e: Dictionary,o: Dictionary,dt: float):
 			finish(e)
 	elif o.type == "gather":
 		if t.is_empty() or t.kind != "resource":
-			if e.carry > 0: o.type = "deliver"
-			else: finish(e)
+			e.resource = o.get("target",0)
+			if e.carry > 0:
+				o.type = "deliver"
+				reset_worker_route(e)
+			else: resume_gathering(e,o)
 			return
 		e.resource = t.id
+		o.resource_type = t.type
 		if e.carry >= 10 or (e.carry > 0 and e.carry_type != t.type):
 			o.type = "deliver"
+			reset_worker_route(e)
 			return
 		if e.p.distance_to(t.p) > t.radius+1.4:
-			move(e,approach(e,t,1.0),dt)
+			# Arrival ends safely inside the working radius, matching Three.js.
+			move(e,approach(e,t,0.8),dt,0.2)
 			return
+		reset_worker_route(e)
 		e.work += dt
 		if e.work >= 0.7:
 			e.work -= 0.7
@@ -447,6 +490,7 @@ func update_worker(e: Dictionary,o: Dictionary,dt: float):
 		var depots = own(e.team).filter(func(b): return b.type == "hq" and b.complete)
 		depots.sort_custom(func(a,b): return e.p.distance_squared_to(a.p) < e.p.distance_squared_to(b.p))
 		if depots.is_empty():
+			feedback("Harvester needs a completed Command core to deliver cargo. Finish or build one, then order delivery.",e.team)
 			finish(e)
 			return
 		var depot = depots[0]
@@ -456,12 +500,7 @@ func update_worker(e: Dictionary,o: Dictionary,dt: float):
 		if e.carry_type != "": players[e.team][e.carry_type] += e.carry
 		e.carry = 0
 		e.carry_type = ""
-		if e.orders.size() > 1: finish(e)
-		elif not entity(e.resource).is_empty():
-			o.type = "gather"
-			o.target = e.resource
-			e.path.clear()
-		else: finish(e)
+		resume_gathering(e,o)
 
 func update_production(b: Dictionary,dt: float):
 	if not b.complete or not b.level_job.is_empty() or b.queue.is_empty(): return

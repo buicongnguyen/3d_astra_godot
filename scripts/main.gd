@@ -492,6 +492,8 @@ Attack: %s per hit" % [d.hp,d.shield,str(d.get("damage",0))]
 Shields absorb damage before HP, then recharge at 4/s after 5 seconds without damage."
 	text += "
 Cost: %d alloy / %d energy · Time: %ds" % [d.cost[0],d.cost[1],d.time]
+	if type == "worker":
+		text += "\nHarvesters gather up to 10 resources and deliver to a completed friendly Command core. After depletion, remaining cargo is delivered and work resumes at an explored, reachable deposit of the same type within 30 world units. Queued orders take priority. Missing deposits or completed cores produce a message; cargo is preserved."
 	if d.kind == "unit":
 		text += "
 Supply: %d · Speed: %.1f" % [d.pop,d.speed]
@@ -852,6 +854,9 @@ func test_call(args):
 			sim.issue(selected,o)
 		"build": sim.build(int(command.worker),command.type,Vector2(command.x,command.z))
 		"train": sim.enqueue(int(command.id),command.type)
+		"harvest_deplete":
+			for r in sim.deposits:
+				if r.id == int(command.get("id",0)): r.amount = 0
 		"progression_setup": sim.players[0].alloy = 5000; sim.players[0].energy = 5000
 		"heavy_setup":
 			sim.spawn("foundry",0,Vector2(-9,34))
@@ -884,7 +889,7 @@ func publish_state():
 	var list = []
 	for e in sim.entities+sim.deposits:
 		var point = view.camera.unproject_position(Vector3(e.p.x,1.2,e.p.y))
-		list.append({"id":e.id,"type":e.type,"team":e.get("team",-1),"x":e.p.x,"z":e.p.y,"screen":[point.x,point.y],"hp":e.get("hp",0),"shield":e.get("shield",0),"level":e.get("level",1),"upgrading":not e.get("level_job",{}).is_empty(),"amount":e.get("amount",0),"complete":e.get("complete",true),"orders":e.get("orders",[]).map(func(o): return o.type),"rally":[e.rally.x,e.rally.y] if e.get("rally") is Vector2 else null,"queue":e.get("queue",[]).map(func(q): return q.type)})
+		list.append({"id":e.id,"type":e.type,"team":e.get("team",-1),"x":e.p.x,"z":e.p.y,"screen":[point.x,point.y],"hp":e.get("hp",0),"shield":e.get("shield",0),"level":e.get("level",1),"upgrading":not e.get("level_job",{}).is_empty(),"amount":e.get("amount",0),"carry":e.get("carry",0),"resource":e.get("resource",0),"complete":e.get("complete",true),"orders":e.get("orders",[]).map(func(o): return o.type),"rally":[e.rally.x,e.rally.y] if e.get("rally") is Vector2 else null,"queue":e.get("queue",[]).map(func(q): return q.type)})
 	var buttons = []
 	collect_buttons(ui,buttons)
 	var state = {"ready":true,"started":started,"paused":paused,"result":sim.result,"time":sim.time,"selected":selected,"population":sim.population(0),"alloy":sim.players[0].alloy,"energy":sim.players[0].energy,"entities":list,"buttons":buttons,"settings":settings,"settings_open":is_instance_valid(settings_panel),"models":view.objects.size(),"focus":[view.focus.x,view.focus.y],"zoom":view.zoom,"mode":mode,"viewport":[ui.size.x,ui.size.y]}

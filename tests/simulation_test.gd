@@ -137,7 +137,7 @@ func run():
 	sim.issue([worker.id],{"type":"gather","target":sim.deposits[0].id})
 	sim.deposits[0].amount = 0
 	sim.tick(0.05)
-	check(worker.orders.is_empty(),"depleted command target is safely discarded")
+	check(not worker.orders.is_empty() and worker.orders[0].target != sim.deposits[0].id,"depleted command target switches to a nearby deposit")
 	check(not sim.nav.terrain_free(Vector2.ZERO,-1),"invalid footprint radius rejected")
 	sim = Simulation.new(false)
 	check(sim.population(0).used == 7 and sim.players[0].alloy == 450 and sim.time == 0,"new match resets economy, entities, and time")

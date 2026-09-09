@@ -38,6 +38,7 @@ jobs:
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/heavy_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/expansion_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/review_test.gd
+          Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/harvesters_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/assets_test.gd
       - name: Export Web and Windows
         run: |
@@ -53,6 +54,7 @@ jobs:
           MOBILE_DPR=1 npm run test:browser
           npm run test:mobile-density
           MOBILE_DPR=1 npm run test:stages
+          npm run test:harvesters
       - uses: actions/upload-artifact@v4
         if: always()
         with:
