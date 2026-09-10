@@ -3,6 +3,8 @@ const Simulation = preload("res://scripts/simulation.gd")
 const WorldView = preload("res://scripts/world_view.gd")
 const Overlay = preload("res://scripts/overlay.gd")
 const Catalog = preload("res://scripts/catalog.gd")
+const WorkButton = preload("res://scripts/work_button.gd")
+const WorkActivity = preload("res://scripts/activity.gd")
 const PALETTES = ["Mint","Coral","Blue","Gold","Violet","Cyan","Orange","Ivory"]
 const HEXES = ["92ebc5","ef7660","689dff","edc76f","b397ee","64d9ed","efa34f","ebe7cd"]
 var sim
@@ -389,7 +391,7 @@ func arrange_actions():
 	for i in range(count):
 		var child = actions.get_child(i)
 		child.visible = not mobile_layout or i/per_page == action_page
-		child.custom_minimum_size.x = action_scroll.size.x-2 if mobile_layout else 0
+		child.custom_minimum_size.x = action_scroll.size.x-2 if mobile_layout else child.get_meta("stable_width",0)
 	action_pager.get_child(0).disabled = action_page == 0
 	action_pager.get_child(1).text = "%d / %d" % [action_page+1,action_pages]
 	action_pager.get_child(2).disabled = action_page == action_pages-1
@@ -792,6 +794,7 @@ func refresh_ui():
 		if sim.seen(known_buildings[id].p) and sim.entity(id).is_empty(): known_buildings.erase(id)
 	var entities = selected.map(func(id): return sim.entity(id))
 	refresh_queue(entities[0] if entities.size() == 1 else {})
+	refresh_work_actions(entities[0] if entities.size() == 1 else {})
 	selection_label.text = "%d UNITS SELECTED" % selected.size() if selected.size() > 1 else (entities[0].name.to_upper() if entities.size() == 1 else "COMMAND YOUR EXPEDITION")
 	var signature = str(selected)+mode+str(queue_orders)
 	stat_row.visible = not entities.is_empty()
@@ -812,13 +815,13 @@ func refresh_ui():
 		stat_labels[3].text = "Restore\n%d/s" % e.get("support",0)
 		info_label.text = "Operational" if e.kind == "building" else ("Standing by" if e.orders.is_empty() else e.orders[0].type.capitalize())
 		if e.carry > 0: info_label.text = "Cargo %d/10 %s" % [e.carry,e.carry_type]
-		if not e.complete: info_label.text = "Building %d%%" % (e.progress*100)
-		elif not e.level_job.is_empty(): info_label.text = "Upgrade L%d · %d%%" % [e.level+1,100*e.level_job.elapsed/e.level_job.time]
+		if not e.complete: info_label.text = "Needs Harvester" if WorkActivity.building(sim,e).label == "Needs Harvester" else " "
+		elif not e.level_job.is_empty(): info_label.text = " "
 		elif not e.queue.is_empty():
 			var q = e.queue[0]
-			info_label.text = "%s %d%% · %s" % [Catalog.get_def(q.type).name,mini(100,int(q.elapsed/Catalog.get_def(q.type).time*100)),q.blocked if q.blocked != "" else "Cancel queue %d/5" % e.queue.size()]
+			info_label.text = q.blocked if q.blocked != "" else " "
 		info_label.tooltip_text = info_label.text
-		signature += str(e.complete)+str(e.queue.map(func(q): return q.id))+str(e.level)+str(e.level_job.is_empty())
+		signature += str(e.level)
 	if mode == "build":
 		var error = sim.placement(building_type,placement_point) if placement_ready or not touch_active else ""
 		notice.text = build_feedback if build_feedback != "" else (error if error != "" else "Place %s: %s" % [Catalog.get_def(building_type).name,"tap ground, then Confirm site." if touch_active else "click a valid site to build."])
@@ -827,6 +830,8 @@ func refresh_ui():
 		notice.text = mode_hints.get(mode,sim.message)
 		if mode == "patrol": notice.text = "Patrol: choose the other end of a repeating route."
 		if mode == "target_attack": notice.text = "Attack: choose a visible enemy unit or building."
+		if mode == "" and (notice.text.ends_with(" construction started.") or notice.text.contains(" upgrading to level ")): notice.text = ""
+		if mode == "" and not entities.is_empty() and entities[0].kind == "building" and notice.text == "Assign Harvesters to the amber alloy deposits.": notice.text = ""
 	notice.add_theme_color_override("font_color",Color("ffd58a") if mode == "build" or sim.message.begins_with("Need ") or sim.message.begins_with("Build ") or sim.message.begins_with("Finish ") else Color("e1ebe2"))
 	if signature == action_signature: return
 	action_signature = signature
@@ -846,22 +851,18 @@ func refresh_ui():
 		actions.add_child(button("Idle workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker" and e.orders.is_empty()).map(func(e): return e.id)))
 		return
 	var e = entities[0]
-	# Put cancellation on the first action page and bind stable jobs, never indices.
-	if entities.size() == 1 and e.kind == "building":
-		if not e.complete:
-			actions.add_child(button("Cancel site · 75% refund",func(): sim.cancel_building(e.id)))
-			actions.add_child(button("Info & stats",func(): show_guide(e.type)))
 	if e.kind != "building" or entities.size() > 1: actions.add_child(button("Info & stats",func(): show_guide(e.type)))
 	if entities.size() == 1 and e.kind == "building":
-		if e.complete:
-			for type in e.get("trains",[]):
-				var d = Catalog.get_def(type)
-				actions.add_child(button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type),hotkey_config.actionKeys[e.trains.find(type)]))
-			actions.add_child(button("Info & stats",func(): show_guide(e.type)))
-			if not e.level_job.is_empty(): actions.add_child(button("Cancel upgrade",func(): sim.cancel_level(e.id)))
-			elif e.level < 3:
-				var cost = sim.level_cost(e)
-				actions.add_child(button("Upgrade L%d · %d/%d" % [e.level+1,cost[0],cost[1]],func(): sim.upgrade_building(e.id)))
+		for type in e.get("trains",[]):
+			var d = Catalog.get_def(type)
+			var train = button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type),hotkey_config.actionKeys[e.trains.find(type)])
+			train.set_meta("work_action","train"); actions.add_child(train)
+		actions.add_child(button("Info & stats",func(): show_guide(e.type)))
+		var cost = sim.level_cost(e)
+		var upgrade = button("Upgrade L%d · %d/%d" % [e.level+1,cost[0],cost[1]] if e.level < 3 else "Maximum level 3",func(): sim.upgrade_building(e.id))
+		upgrade.set_meta("work_action","upgrade"); actions.add_child(upgrade)
+		upgrade.set_meta("stable_width",180)
+		refresh_work_actions.call_deferred(e)
 	else:
 		if entities.any(func(u): return u.type == "worker"):
 			actions.add_child(button("Attack",func(): run_shortcut("attack"),"N"))
@@ -879,22 +880,41 @@ func refresh_ui():
 		actions.add_child(button("Queue: ON" if queue_orders else "Queue: OFF",func(): queue_orders = not queue_orders))
 
 func refresh_queue(e: Dictionary):
-	var visible_queue = not e.is_empty() and e.kind == "building" and not e.queue.is_empty()
+	var visible_queue = not e.is_empty() and e.kind == "building"
 	if queue_strip.visible != visible_queue:
 		queue_strip.visible = visible_queue
 		layout.call_deferred()
 	if not visible_queue:
 		queue_signature = ""
 		return
-	var signature = str(e.id)+str(e.queue.map(func(q): return [q.id,q.type]))
+	var jobs = []
+	if not e.complete:
+		var a = WorkActivity.building(sim,e)
+		jobs.append({"kind":"site","ref":e,"type":e.type,"progress":e.progress,"blocked":a.label if a.get("waiting",false) else "","label":"Cancel site · 75% refund"})
+	elif not e.level_job.is_empty():
+		jobs.append({"kind":"level","ref":e.level_job,"type":e.type,"progress":e.level_job.elapsed/e.level_job.time,"blocked":"","label":"Cancel upgrade"})
+	else:
+		for i in range(e.queue.size()):
+			var q = e.queue[i]
+			jobs.append({"kind":"train","ref":q,"type":q.type,"progress":q.elapsed/Catalog.get_def(q.type).time,"blocked":q.blocked,"label":"Cancel %s #%d · refund" % [Catalog.get_def(q.type).name,i+1]})
+	var signature = str(e.id)+str(e.complete)+str(e.level_job.is_empty())+str(e.queue.map(func(q): return [q.id,q.type]))
 	if queue_signature != signature:
 		queue_signature = signature
 		clear_children(queue_strip)
-		for i in range(e.queue.size()):
-			var job_id = e.queue[i].id
-			var job_name = Catalog.get_def(e.queue[i].type).name
-			var item = button("",func():
-				if not paused and sim.cancel_job(e.id,job_id): sim.message = job_name+" cancelled · full refund."
+		for job in jobs:
+			var expected_sim = sim
+			var ref = job.ref
+			var kind = job.kind
+			var item = WorkButton.new()
+			item.pressed.connect(func():
+				if paused or not started or sim.result != "" or sim != expected_sim or not is_same(sim.entity(e.id),e): return
+				if kind == "site":
+					if not e.complete: sim.cancel_building(e.id)
+				elif kind == "level":
+					if is_same(e.level_job,ref): sim.cancel_level(e.id)
+				else: sim.cancel_job(e.id,ref.id)
+				ui_action_serial += 1
+				refresh_ui()
 			)
 			item.custom_minimum_size = Vector2(44,44)
 			item.add_theme_font_size_override("font_size",11)
@@ -903,15 +923,30 @@ func refresh_queue(e: Dictionary):
 				style.content_margin_left = 3; style.content_margin_right = 3
 				style.content_margin_top = 3; style.content_margin_bottom = 3
 				item.add_theme_stylebox_override(state,style)
-			item.set_meta("command_label","Cancel %s #%d · refund" % [job_name,i+1])
-			item.tooltip_text = "Cancel %s #%d · full refund" % [job_name,i+1]
+			item.set_meta("command_label",job.label)
+			item.set_meta("work_kind",kind)
+			var names = {"worker":"H","vanguard":"V","ranger":"R","medic":"M+","antitank":"AT","breaker":"B","engineer":"E","tank":"T","upgrade":"W"}
+			item.glyph = "↑" if kind == "level" else ("⌂" if kind == "site" else names.get(job.type,"?"))
 			queue_strip.add_child(item)
-	var names = {"worker":"Hrv","vanguard":"Vgd","ranger":"Rng","medic":"Med","antitank":"AT","breaker":"Brk","engineer":"Eng","tank":"Tank","upgrade":"Tech"}
-	for i in range(e.queue.size()):
-		var q = e.queue[i]
+	for i in range(jobs.size()):
+		var job = jobs[i]
 		var item = queue_strip.get_child(i)
-		item.text = "%s %d\n%s" % [names.get(q.type,q.type.left(3)),i+1,"Wait" if q.blocked != "" else "%d%%" % mini(100,int(100*q.elapsed/Catalog.get_def(q.type).time))]
+		item.progress = job.progress; item.waiting = job.blocked != ""
+		item.tooltip_text = "%s · %d%% %s" % [job.label,clampi(int(job.progress*100),0,100),job.blocked]
 		item.disabled = paused or not started or sim.result != ""
+		item.queue_redraw()
+
+func refresh_work_actions(e: Dictionary):
+	if e.is_empty() or e.kind != "building": return
+	for item in actions.get_children():
+		var kind = item.get_meta("work_action","")
+		if kind == "": continue
+		# Match normal padding while disabled so busy buttons cannot shrink/reflow.
+		if not item.has_theme_stylebox_override("disabled"):
+			var disabled_style = item.get_theme_stylebox("normal").duplicate()
+			disabled_style.bg_color = Color("17282e")
+			item.add_theme_stylebox_override("disabled",disabled_style)
+		item.disabled = paused or not started or sim.result != "" or not e.complete or not e.level_job.is_empty() or (kind == "upgrade" and (e.level >= 3 or not e.queue.is_empty()))
 
 func compact_stat(value: float) -> String:
 	return ("%.1fk" % (value/1000) if value < 100000 else "%dk" % roundi(value/1000)) if value >= 10000 else str(ceili(value))
@@ -1075,6 +1110,10 @@ func collect_buttons(node: Node,list: Array):
 	if node is Button and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
 		list.append({"text":node.get_meta("command_label",node.text),"display_text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
+		if node is WorkButton:
+			list[-1].work_progress = node.progress
+			list[-1].work_glyph = node.glyph
+			list[-1].red_rect = [rect.position.x+1,rect.position.y+35,rect.size.x-2,8]
 	for child in node.get_children(): collect_buttons(child,list)
 
 func shortcut_actions() -> Array:

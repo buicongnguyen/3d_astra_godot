@@ -55,19 +55,19 @@ func map_point(p: Vector2) -> Vector2:
 func project(p: Vector2,height: float) -> Vector2:
 	return game.view.camera.unproject_position(Vector3(p.x,height,p.y))
 
-func badge(p: Vector2,text: String,progress: float,color: Color,width: float = 116):
+func badge(p: Vector2,progress: float,color: Color):
+	var width = 59.0
 	if not get_viewport_rect().grow(width).has_point(p): return
 	# Keep world labels clear of touch controls and the minimap on small screens.
 	p.x = clampf(p.x,width/2+4,get_viewport_rect().size.x-width/2-4)
-	var bounds = Rect2(p-Vector2(width/2+3,19),Vector2(width+6,30))
+	var bounds = Rect2(p-Vector2(width/2+2,2),Vector2(width+4,9))
 	if bounds.intersects(game.minimap_rect.grow(4)):
 		p.x = game.minimap_rect.position.x-width/2-8
-		bounds.position.x = p.x-width/2-3
+		bounds.position.x = p.x-width/2-2
 	if not feedback_visible(bounds): return
-	draw_rect(Rect2(p-Vector2(width/2+3,19),Vector2(width+6,30)),Color("0b1c20"))
-	draw_string(ThemeDB.fallback_font,p-Vector2(width/2,5),text,HORIZONTAL_ALIGNMENT_CENTER,width,11,Color("f5f5df"))
-	draw_rect(Rect2(p+Vector2(-width/2,2),Vector2(width,5)),Color("3d5152"))
-	draw_rect(Rect2(p+Vector2(-width/2,2),Vector2(width*clampf(progress,0,1),5)),color)
+	draw_rect(bounds,Color("0b1c20"))
+	for i in range(10):
+		draw_rect(Rect2(p+Vector2(-width/2+i*6,0),Vector2(5,5)),color if i < ceili(clampf(progress,0,1)*10) else Color("304a3a"))
 
 func feedback_visible(bounds: Rect2) -> bool:
 	return get_viewport_rect().encloses(bounds) and not bounds.intersects(game.header.get_global_rect().grow(3)) and not bounds.intersects(game.bottom.get_global_rect().grow(3)) and not bounds.intersects(game.minimap_rect.grow(3))
@@ -82,7 +82,7 @@ func draw_activity():
 		var a = Activity.building(sim,e)
 		if not a.is_empty():
 			var p = project(e.p,6.4)
-			badge(p,"%s · %d%%" % [a.label,int(a.progress*100)],a.progress,Color("ffbd75") if a.get("waiting",false) else Color("a8edc6"))
+			badge(p,a.progress,Color("ffbd75") if a.get("waiting",false) else Color("a8edc6"))
 			var record = a.duplicate(); record.id = e.id; record.x = p.x; record.y = p.y
 			activity_snapshot.buildings.append(record)
 		if e.type != "worker": continue
@@ -100,7 +100,7 @@ func draw_activity():
 		if game.selected.has(e.id) and (not r.is_empty() or e.carry > 0):
 			var order = e.orders[0].type if not e.orders.is_empty() else ""
 			var text = "Harvesting" if mining else ("Returning cargo" if order == "deliver" else (("To deposit" if e.moving else "Waiting") if not r.is_empty() else "Cargo"))
-			badge(project(e.p,4),"%s · %d/10" % [text,e.carry],e.carry/10.0,Color("ffd17d"),100)
+			badge(project(e.p,4),e.carry/10.0,Color("ffd17d"))
 			activity_snapshot.workers.append({"id":e.id,"label":text,"carry":e.carry,"mining":mining})
 	for r in targets.values():
 		var points = PackedVector2Array()
