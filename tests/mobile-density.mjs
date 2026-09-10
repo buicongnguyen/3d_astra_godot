@@ -18,6 +18,21 @@ try{
  await page.goto(url+'?test=1');await page.waitForFunction(()=>window.frontierState?.ready,null,{timeout:90000});
  assert.deepEqual((await state()).viewport,[390,844]);
  await press('Deploy expedition');assert.equal((await state()).started,true);
+ for(const viewport of [{width:320,height:568},{width:390,height:844},{width:800,height:360}]){
+   await page.setViewportSize(viewport);await page.waitForFunction(v=>frontierState.viewport[0]===v.width&&frontierState.viewport[1]===v.height,viewport);
+   let s=await state();
+   assert.ok(s.buttons.filter(b=>['Home','−','+','Pause','Keys','Objectives'].includes(b.text)).every(b=>b.w>=44&&b.h>=44&&b.x>=0&&b.x+b.w<=viewport.width),'phone header controls fit and have 44px targets');
+   assert.equal(s.objectives_visible,false);
+   await press('Objectives');s=await state();assert.equal(s.objectives_visible,true);
+   const [x,y,w,h]=s.objectives_rect;
+   assert.ok(x>=0&&y>=0&&x+w<=viewport.width&&y+h<=viewport.height,'objectives popup fits');
+   const orders=snapshot=>snapshot.entities.filter(e=>snapshot.selected.includes(e.id)).map(e=>[e.id,e.orders]);
+   await page.touchscreen.tap(x+w/2,y+h/2);await page.waitForTimeout(180);
+   assert.deepEqual((await state()).selected,s.selected,'popup taps preserve selection');
+   assert.deepEqual(orders(await state()),orders(s),'popup taps do not issue battlefield orders');
+   await press('Objectives');assert.equal((await state()).objectives_visible,false);
+ }
+ await page.setViewportSize({width:390,height:844});await page.waitForFunction(()=>frontierState.viewport[0]===390&&frontierState.viewport[1]===844);
  await press('More actions');assert.equal((await state()).action_page,1);
  await press('Previous');await press('Info & stats');await press('Close field guide');
  await page.screenshot({path:'test-results/density-portrait.png'});

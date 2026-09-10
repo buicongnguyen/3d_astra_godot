@@ -61,6 +61,9 @@ var test_enabled = false
 var beep: AudioStreamPlayer
 var last_key = ""
 var objective: Label
+var objectives_button: Button
+var objectives_popup: Panel
+var objectives_copy: Label
 var known_buildings: Dictionary = {}
 var build_feedback = ""
 var ui_action_serial = 0
@@ -79,6 +82,8 @@ var last_group = 0
 var last_group_time = 0
 
 func _input(event):
+	if (event is InputEventScreenTouch or event is InputEventMouseButton) and event.pressed and is_instance_valid(objectives_popup) and objectives_popup.visible:
+		if not objectives_popup.get_global_rect().has_point(event.position) and not objectives_button.get_global_rect().has_point(event.position): objectives_popup.hide()
 	if event is InputEventKey and handle_hotkey(event):
 		get_viewport().set_input_as_handled()
 		return
@@ -90,6 +95,8 @@ func _input(event):
 	if event is InputEventScreenTouch and not event.pressed and not is_world_point(event.position): touches.erase(event.index); multi_gesture = true
 
 func is_world_point(point: Vector2) -> bool:
+	if is_instance_valid(objectives_button) and objectives_button.visible and objectives_button.get_global_rect().has_point(point): return false
+	if is_instance_valid(objectives_popup) and objectives_popup.visible and objectives_popup.get_global_rect().has_point(point): return false
 	return is_instance_valid(header) and is_instance_valid(bottom) and not header.get_global_rect().has_point(point) and not bottom.get_global_rect().has_point(point)
 
 func _notification(what):
@@ -276,6 +283,17 @@ func make_ui():
 	objective = label("",14)
 	objective.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	ui.add_child(objective)
+	objectives_button = button("Objectives",func(): objectives_popup.visible = not objectives_popup.visible)
+	objectives_button.z_index = 2
+	objectives_button.hide()
+	ui.add_child(objectives_button)
+	objectives_popup = Panel.new()
+	objectives_popup.z_index = 2
+	objectives_popup.hide()
+	ui.add_child(objectives_popup)
+	objectives_copy = label("",14)
+	objectives_copy.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	objectives_popup.add_child(objectives_copy)
 	overlay = Overlay.new()
 	overlay.game = self
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -331,6 +349,14 @@ func layout():
 	resource_label.position = Vector2(12,35 if narrow else 36)
 	resource_label.add_theme_font_size_override("font_size",11 if size.x < 360 or landscape_layout else (13 if narrow else 15))
 	nav_buttons.position = Vector2(12,57) if narrow else Vector2(size.x-330,12)
+	# Widen zoom hit targets while retaining enough room for all five header buttons.
+	for nav_button in nav_buttons.get_children():
+		nav_button.custom_minimum_size.x = 44 if narrow else 0
+		for state_name in ["normal","hover","pressed","focus"]:
+			var style = ui.theme.get_stylebox(state_name,"Button").duplicate()
+			style.content_margin_left = 8 if narrow else 12
+			style.content_margin_right = 8 if narrow else 12
+			nav_button.add_theme_stylebox_override(state_name,style)
 	var height = 250 if narrow else 170
 	bottom.position = Vector2(10,size.y-height-10)
 	bottom.size = Vector2(size.x-20,height)
@@ -360,6 +386,15 @@ func layout():
 	minimap_rect = Rect2(field_width-minimap_size-18,header.position.y+header.size.y+12,minimap_size,minimap_size)
 	objective.position = Vector2(18,header.position.y+header.size.y+12)
 	objective.size = Vector2(maxf(100,field_width-minimap_size-60),55)
+	objective.visible = not narrow
+	objectives_button.position = Vector2(18,header.position.y+header.size.y+12)
+	objectives_button.size = Vector2(112,44)
+	objectives_button.visible = narrow and started and not paused and sim.result == ""
+	objectives_popup.position = objectives_button.position+Vector2(0,48)
+	objectives_popup.size = Vector2(minf(300,field_width-36),120)
+	objectives_copy.position = Vector2(12,10)
+	objectives_copy.size = objectives_popup.size-Vector2(24,20)
+	if not objectives_button.visible: objectives_popup.hide()
 	modal.size = Vector2(minf(490,size.x-30),minf(490,size.y-30))
 	modal.position = (size-modal.size)*0.5
 	modal_scroll.position = Vector2(24,22)
@@ -426,6 +461,7 @@ func start_match():
 	acknowledge()
 
 func reset_sim(river: bool, stage_id: String = ""):
+	if is_instance_valid(objectives_popup): objectives_popup.hide()
 	test_manual_clock = false
 	sim = Simulation.new(true,river,stage_id)
 	view.sim = sim
@@ -788,6 +824,9 @@ func refresh_ui():
 	var supply = sim.own(0).any(func(e): return e.type == "relay" and e.complete)
 	var army_size = sim.own(0).filter(func(e): return e.kind == "unit" and e.type != "worker").size()
 	objective.text = "Tech %d / 3 · " % sim.tech_level(0)+("1 / 4  Assign workers to alloy and energy" if not harvest else ("2 / 4  Construct a Supply relay" if not supply else ("3 / 4  Train an army of eight" if army_size < 8 else "4 / 4  Destroy the enemy Command core")))+"\nIdle workers: "+str(idle.size())
+	objectives_copy.text = objective.text
+	objectives_button.visible = mobile_layout and started and not paused and sim.result == ""
+	if not objectives_button.visible: objectives_popup.hide()
 	for e in sim.entities:
 		if e.team == 1 and e.kind == "building" and sim.seen(e.p): known_buildings[e.id] = {"p":e.p,"type":e.type}
 	for id in known_buildings.keys():
@@ -1084,6 +1123,8 @@ func publish_state():
 	state.guide_open = is_instance_valid(guide_panel)
 	state.tech_level = sim.tech_level(0)
 	state.mobile_layout = mobile_layout
+	state.objectives_visible = objectives_popup.visible
+	state.objectives_rect = [objectives_popup.global_position.x,objectives_popup.global_position.y,objectives_popup.size.x,objectives_popup.size.y]
 	state.action_page = action_page
 	state.action_pages = action_pages
 	state.action_buttons = []
@@ -1214,7 +1255,11 @@ func handle_hotkey(event: InputEventKey) -> bool:
 	if is_instance_valid(guide_panel) or is_instance_valid(settings_panel): return false
 	var focus = get_viewport().gui_get_focus_owner()
 	if focus is LineEdit or focus is TextEdit or focus is OptionButton: return false
+	if code == KEY_ESCAPE and objectives_popup.visible:
+		objectives_popup.hide()
+		return true
 	if code == KEY_SPACE and not event.ctrl_pressed:
+		if focus == objectives_button: return false
 		if not event.echo: toggle_pause()
 		return true
 	if paused or not started or sim.result != "": return false
