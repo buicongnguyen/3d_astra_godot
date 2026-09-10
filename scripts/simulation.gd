@@ -116,8 +116,8 @@ func update_vision():
 						explored[team][y*nav.grid_size+x] = 1
 
 func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
-	if result != "" or not order.get("type","") in ["move","attackmove","attack","gather","deliver","build","support","stop"]: return
-	if order.type in ["move","attackmove"] and (not order.get("p") is Vector2 or not order.p.is_finite()): return
+	if result != "" or not order.get("type","") in ["move","attackmove","patrol","attack","gather","deliver","build","support","stop"]: return
+	if order.type in ["move","attackmove","patrol"] and (not order.get("p") is Vector2 or not order.p.is_finite()): return
 	var units = []
 	for id in ids:
 		var e = entity(id)
@@ -125,6 +125,7 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 	var side = ceili(sqrt(units.size()))
 	for i in range(units.size()):
 		var e = units[i]
+		if order.type == "patrol" and (e.type == "worker" or e.get("damage",0) <= 0): continue
 		var target = entity(order.get("target",0))
 		if order.type == "attack" and (target.is_empty() or target.get("team",team) == team or not seen(target.p,team)): continue
 		if order.type in ["gather","deliver","build"] and e.type != "worker": continue
@@ -135,10 +136,15 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 			feedback(e.name+" cannot attack. Use Support on a friendly target.",team)
 			continue
 		var o = order.duplicate()
+		# Capture the return point only when a queued patrol becomes active.
+		if o.type == "patrol": o.origin = null
 		if o.type == "gather": o.resource_type = target.type
-		if o.type in ["move","attackmove"] and units.size() > 1:
+		if o.type in ["move","attackmove","patrol"] and units.size() > 1:
 			o.p += Vector2((i%side)-(side-1)*0.5,floori(float(i)/side)-(side-1)*0.5)*2.1
 			o.p = o.p.clamp(Vector2.ONE*(-nav.half+3),Vector2.ONE*(nav.half-3))
+		if o.type == "patrol":
+			var limit = nav.half-maxf(1,e.radius+0.1)
+			o.p = o.p.clamp(Vector2.ONE*-limit,Vector2.ONE*limit)
 		if not append or o.type == "stop":
 			e.orders.clear()
 			e.path.clear()
@@ -402,13 +408,13 @@ func move(e: Dictionary,goal: Vector2,dt: float,tolerance: float = 0.25) -> bool
 	e.stalled = 0
 	return false
 
-func enemy(e: Dictionary,radius: float) -> Dictionary:
+func enemy(e: Dictionary,radius: float,clear_shot: bool = false) -> Dictionary:
 	var best = {}
 	var best_d = radius
 	for t in entities:
 		if t.hp <= 0 or t.team == e.team or not seen(t.p,e.team): continue
 		var d = e.p.distance_to(t.p)-t.radius
-		if d < best_d:
+		if d <= best_d+0.00001 and (not clear_shot or nav.clear_line(e.p,t.p,e.id,t.id)):
 			best = t
 			best_d = d
 	return best
@@ -436,7 +442,7 @@ func hit(e: Dictionary,t: Dictionary):
 
 func fight(e: Dictionary,t: Dictionary,dt: float,chase: bool = true) -> bool:
 	if e.get("damage",0) <= 0 or t.is_empty() or t.get("hp",0) <= 0 or t.team == e.team or not seen(t.p,e.team): return false
-	if e.p.distance_to(t.p) <= e.range+t.radius and nav.clear_line(e.p,t.p,e.id,t.id):
+	if e.p.distance_to(t.p) <= e.range+t.radius+0.00001 and nav.clear_line(e.p,t.p,e.id,t.id):
 		e.angle = atan2(t.p.x-e.p.x,t.p.y-e.p.y)
 		if e.cooldown <= 0: hit(e,t)
 	elif chase and e.kind == "unit": move(e,approach(e,t,maxf(1.2,e.range*0.7)),dt)
@@ -626,6 +632,20 @@ func tick(dt: float):
 			var target = enemy(e,12)
 			if not target.is_empty(): fight(e,target,dt)
 			elif move(e,o.p,dt,1.1): finish(e)
+		elif o.type == "patrol":
+			if o.origin == null: o.origin = e.p
+			var target = enemy(e,e.range,true)
+			if not target.is_empty():
+				fight(e,target,dt,false)
+				reset_worker_route(e)
+			elif move(e,o.p,dt,1.1):
+				# Yield at the next endpoint if another order was queued.
+				if e.orders.size() > 1: finish(e)
+				else:
+					var destination = o.p
+					o.p = o.origin
+					o.origin = destination
+					reset_worker_route(e)
 		elif o.type == "move" and move(e,o.p,dt,1.1): finish(e)
 	var units = entities.filter(func(e): return e.hp > 0 and e.kind == "unit")
 	for i in range(units.size()):

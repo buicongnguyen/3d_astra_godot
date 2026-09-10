@@ -608,7 +608,15 @@ func context_order(screen: Vector2,attack: bool = false):
 			var b = sim.entity(id)
 			if b.get("kind","") == "building" and b.complete and not b.get("trains",[]).is_empty(): b.rally = p
 		mode = ""; return
-	var order = {"type":"attackmove" if attack else "move","p":p}
+	if mode == "target_attack":
+		if target.is_empty() or target.get("team",-1) <= 0 or not sim.seen(target.p,0):
+			sim.message = "Attack: choose a visible enemy unit or building."
+			return
+		sim.issue(ids.filter(func(id): return sim.entity(id).get("damage",0) > 0),{"type":"attack","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
+		acknowledge()
+		mode = ""
+		return
+	var order = {"type":"patrol" if mode == "patrol" else ("attackmove" if attack else "move"),"p":p}
 	if mode == "support":
 		var helpers = ids.filter(func(id): return sim.entity(id).get("support",0) > 0)
 		if target.is_empty() or not helpers.any(func(id): return sim.support_valid(sim.entity(id),target)):
@@ -617,7 +625,7 @@ func context_order(screen: Vector2,attack: bool = false):
 		sim.issue(helpers,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
 		mode = ""
 		return
-	if not target.is_empty() and not mode in ["move","attack"]:
+	if not target.is_empty() and not mode in ["move","attack","patrol"]:
 		if target.get("team",-1) == 0:
 			sim.issue(ids,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
 			ids = ids.filter(func(id): return sim.entity(id).get("support",0) <= 0)
@@ -639,7 +647,7 @@ func click_world(point: Vector2,touch: bool = false):
 		placement_ready = true
 		if not touch: confirm_build()
 		return
-	if mode in ["attack","move","support","context","rally"]:
+	if mode in ["attack","move","support","context","rally","patrol","target_attack"]:
 		context_order(point,mode == "attack")
 		return
 	var target = view.pick(point)
@@ -777,6 +785,8 @@ func refresh_ui():
 	else:
 		var mode_hints = {"support":"Support: choose a friendly target to follow and restore.","attack":"Attack-move: choose a destination.","move":"Move: choose a destination to withdraw.","context":"Context: choose a deposit, enemy or friendly construction site.","rally":"Rally: choose a destination for newly trained units."}
 		notice.text = mode_hints.get(mode,sim.message)
+		if mode == "patrol": notice.text = "Patrol: choose the other end of a repeating route."
+		if mode == "target_attack": notice.text = "Attack: choose a visible enemy unit or building."
 	notice.add_theme_color_override("font_color",Color("ffd58a") if mode == "build" or sim.message.begins_with("Need ") or sim.message.begins_with("Build ") or sim.message.begins_with("Finish ") else Color("e1ebe2"))
 	if signature == action_signature: return
 	action_signature = signature
@@ -810,6 +820,8 @@ func refresh_ui():
 				actions.add_child(button("Upgrade L%d · %d/%d" % [e.level+1,cost[0],cost[1]],func(): sim.upgrade_building(e.id)))
 	else:
 		if entities.any(func(u): return u.type == "worker"):
+			actions.add_child(button("Attack",func(): run_shortcut("attack"),"N"))
+			actions.add_child(button("Move",func(): run_shortcut("move"),"M"))
 			for type in ["relay","barracks","foundry","tower","hq"]:
 				var d = Catalog.get_def(type)
 				actions.add_child(button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type),hotkey_config.actionKeys[["relay","barracks","foundry","tower","hq"].find(type)]))
@@ -817,7 +829,9 @@ func refresh_ui():
 			if entities.any(func(u): return u.get("support",0) > 0): actions.add_child(button("Support",func(): mode = "support"))
 			actions.add_child(button("Move",func(): mode = "move"))
 			actions.add_child(button("Attack-move",func(): mode = "attack"))
-		actions.add_child(button("Stop",func(): sim.issue(selected,{"type":"stop"})))
+		if entities.any(func(u): return u.kind == "unit" and u.type != "worker" and u.get("damage",0) > 0):
+			actions.add_child(button("Patrol",func(): run_shortcut("patrol"),"P"))
+		actions.add_child(button("Stop",func(): run_shortcut("stop")))
 		actions.add_child(button("Queue: ON" if queue_orders else "Queue: OFF",func(): queue_orders = not queue_orders))
 
 func _process(dt):
@@ -882,6 +896,17 @@ func test_call(args):
 			sim.spawn("foundry",0,Vector2(-9,34))
 			sim.spawn("relay",0,Vector2(-4,34))
 			sim.nav.rebuild(sim.entities)
+		"patrol_setup":
+			sim.entities = sim.entities.filter(func(e): return e.kind == "building")
+			sim.spawn("worker",0,Vector2(0,20))
+			sim.spawn("ranger",0,Vector2(-4,20))
+			sim.spawn("tank",0,Vector2(4,20))
+			sim.spawn("medic",0,Vector2(6,26))
+			var enemy = sim.spawn("worker",1,Vector2(2,20))
+			enemy.hp = 10000; enemy.max_hp = 10000
+			sim.nav.rebuild(sim.entities); sim.update_vision()
+			view.focus = Vector2(0,24); view.zoom = 42
+			selected.clear(); mode = ""
 		"support_setup":
 			var healer = sim.own(0).filter(func(e): return e.type == "medic")[0]
 			var ally = sim.own(0).filter(func(e): return e.type == "ranger")[0]
@@ -1003,6 +1028,11 @@ func run_shortcut(id: String):
 			if not es.any(func(u): return (u.kind == "building" and u.complete and not u.get("trains",[]).is_empty()) if id == "rally" else u.kind == "unit"):
 				sim.message = "Select a completed production building first." if id == "rally" else "Select units first."
 			else: mode = "attack" if id == "attackmove" else id
+		"patrol","attack":
+			if es.any(func(u): return u.kind == "unit" and u.get("damage",0) > 0 and (id != "patrol" or u.type != "worker")):
+				mode = "patrol" if id == "patrol" else "target_attack"
+				placement_ready = false
+			else: sim.message = "Select soldiers or tanks to patrol." if id == "patrol" else "Select a Harvester or combat unit to attack."
 		"stop": mode = ""; sim.issue(selected,{"type":"stop"}); sim.message = "Orders cleared."
 		"deliver":
 			var ws = es.filter(func(u): return u.type == "worker" and u.carry > 0)

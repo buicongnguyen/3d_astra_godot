@@ -8,6 +8,8 @@ An original 3D single-player RTS built in **Godot 4.7.2 / GDScript**, with origi
 
 ## Play
 
+Soldiers and tanks can **Patrol (P)** between two points. Harvesters have an explicit **Attack (N)** command. See [Patrol and Harvester Attack](docs/PATROL_AND_ATTACK.md) for mouse, touch and order-queue behavior.
+
 Choose Meridian Riverlands or Ashen Frontier, customize army colors if desired, and deploy. Assign Harvesters to alloy and energy, build supply, train a mixed army, then destroy the enemy Command core.
 
 - Desktop: click/drag selection, right-click orders, WASD/arrows to pan, wheel or +/− to zoom. **B** opens construction; **Q E R T Y** activate displayed build/train actions; **F** attack-move, **M** withdraw, **X** stop; **H/J/K** cycle production buildings; **Home** focuses selection. **F1/F2/F3/F4** select idle Harvester/army/Harvesters/buildings. Ctrl+1–9 saves groups, Shift+1–9 adds, numbers recall. Open **Keys** or **?** for clickable commands and the [complete shortcut reference](docs/PC_SHORTCUTS.md).
