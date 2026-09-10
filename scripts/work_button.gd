@@ -1,12 +1,14 @@
 extends Button
 
 var glyph = ""
+var work_icon: Texture2D
 var progress = 0.0
 var waiting = false
 
 func _draw():
 	var tint = Color(1,1,1,0.45 if disabled else 1)
-	draw_string(get_theme_font("font"),Vector2(2,20),glyph,HORIZONTAL_ALIGNMENT_CENTER,size.x-4,12,Color("d3e4d6")*tint)
+	if work_icon: draw_texture_rect(work_icon,Rect2((size.x-20)/2,3,20,20),false,tint)
+	else: draw_string(get_theme_font("font"),Vector2(2,20),glyph,HORIZONTAL_ALIGNMENT_CENTER,size.x-4,12,Color("d3e4d6")*tint)
 	for i in range(10):
 		var cell = Rect2(Vector2(2+i*4,27),Vector2(3,3))
 		draw_rect(cell,(Color("72e990") if i < ceili(clampf(progress,0,1)*10) else Color("304d3c"))*tint)

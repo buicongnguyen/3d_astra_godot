@@ -5,6 +5,9 @@ const Overlay = preload("res://scripts/overlay.gd")
 const Catalog = preload("res://scripts/catalog.gd")
 const WorkButton = preload("res://scripts/work_button.gd")
 const WorkActivity = preload("res://scripts/activity.gd")
+const Icons = preload("res://scripts/ui_icons.gd")
+const CommandTile = preload("res://scripts/menu_button.gd")
+const StatCell = preload("res://scripts/stat_cell.gd")
 const PALETTES = ["Mint","Coral","Blue","Gold","Violet","Cyan","Orange","Ivory"]
 const HEXES = ["92ebc5","ef7660","689dff","edc76f","b397ee","64d9ed","efa34f","ebe7cd"]
 var sim
@@ -35,6 +38,7 @@ var bottom: Panel
 var title_label: Label
 var resource_label: Label
 var selection_label: Label
+var selection_icon: TextureRect
 var info_label: Label
 var stat_row: HBoxContainer
 var stat_labels: Array = []
@@ -180,8 +184,8 @@ func label(text: String,font_size: int = 15) -> Label:
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
 
-func button(text: String,callback: Callable,key: String = "") -> Button:
-	var b = Button.new()
+func button(text: String,callback: Callable,key: String = "", menu: bool = false) -> Button:
+	var b = CommandTile.new() if menu else Button.new()
 	b.text = text
 	b.custom_minimum_size = Vector2(0,44)
 	b.add_theme_font_size_override("font_size",14)
@@ -205,6 +209,12 @@ func button(text: String,callback: Callable,key: String = "") -> Button:
 		callback.call()
 		ui_action_serial += 1
 	)
+	return b
+
+func command_button(text: String,callback: Callable,key: String = "",kind: String = "",caption: String = "",cost: Array = []) -> Button:
+	var icons = {"Info & stats":"book","Field guide":"book","Select army":"people","Select workers":"worker","Idle workers":"worker","Attack":"crosshair","Attack-move":"crosshair","Move":"move","Support":"medic","Patrol":"patrol","Stop":"stop","Queue: ON":"queue","Queue: OFF":"queue","Confirm site":"check","Cancel":"close","Maximum level 3":"upgrade"}
+	var b = button(text,callback,key,true)
+	b.configure(text,kind if kind != "" else icons.get(text,"upgrade"),caption,cost,not touch_device and b.get_child_count() > 0)
 	return b
 
 func make_ui():
@@ -238,7 +248,13 @@ func make_ui():
 	bottom = Panel.new()
 	ui.add_child(bottom)
 	selection_label = label("SELECT YOUR EXPEDITION",18)
+	selection_label.clip_text = true
 	bottom.add_child(selection_label)
+	selection_icon = TextureRect.new()
+	selection_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	selection_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	selection_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bottom.add_child(selection_icon)
 	info_label = label("",13)
 	info_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	info_label.clip_text = true
@@ -247,11 +263,10 @@ func make_ui():
 	stat_row = HBoxContainer.new()
 	stat_row.add_theme_constant_override("separation",6)
 	bottom.add_child(stat_row)
-	for title in ["HP","Shield","ATK","Restore"]:
-		var value = label(title,12)
-		value.clip_text = true
+	for entry in [["HP","health"],["Shield","shield"],["ATK","crosshair"],["Restore","medic"]]:
+		var value = StatCell.new()
+		value.configure(entry[0],entry[1])
 		value.mouse_filter = Control.MOUSE_FILTER_PASS
-		value.autowrap_mode = TextServer.AUTOWRAP_OFF
 		value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		stat_row.add_child(value)
 		stat_labels.append(value)
@@ -364,7 +379,10 @@ func layout():
 		bottom.position = Vector2(size.x-290,10)
 		bottom.size = Vector2(280,size.y-20)
 		height = bottom.size.y
-	selection_label.position = Vector2(12,10)
+	selection_icon.position = Vector2(12,8)
+	selection_icon.size = Vector2(24,24)
+	selection_label.position = Vector2(44,10)
+	selection_label.size = Vector2(minf(300,bottom.size.x-24)-32,22)
 	selection_label.add_theme_font_size_override("font_size",15 if narrow else 18)
 	stat_row.position = Vector2(12,34)
 	stat_row.size = Vector2(minf(300,bottom.size.x-24),37)
@@ -418,7 +436,8 @@ func layout():
 func arrange_actions():
 	if not is_instance_valid(action_pager): return
 	var count = actions.get_child_count()
-	var per_page = mini(4 if landscape_layout else 2,maxi(1,floori((action_scroll.size.y+6)/50)))
+	var rows = mini(4 if landscape_layout else 2,maxi(1,floori((action_scroll.size.y+6)/50)))
+	var per_page = rows*2
 	action_pages = maxi(1,ceili(float(count)/per_page)) if mobile_layout else 1
 	action_page = clampi(action_page,0,action_pages-1)
 	action_pager.visible = mobile_layout and count > 0
@@ -426,7 +445,7 @@ func arrange_actions():
 	for i in range(count):
 		var child = actions.get_child(i)
 		child.visible = not mobile_layout or i/per_page == action_page
-		child.custom_minimum_size.x = action_scroll.size.x-2 if mobile_layout else child.get_meta("stable_width",0)
+		child.custom_minimum_size.x = (action_scroll.size.x-6)/2-1 if mobile_layout else child.get_meta("stable_width",0)
 	action_pager.get_child(0).disabled = action_page == 0
 	action_pager.get_child(1).text = "%d / %d" % [action_page+1,action_pages]
 	action_pager.get_child(2).disabled = action_page == action_pages-1
@@ -835,6 +854,7 @@ func refresh_ui():
 	refresh_queue(entities[0] if entities.size() == 1 else {})
 	refresh_work_actions(entities[0] if entities.size() == 1 else {})
 	selection_label.text = "%d UNITS SELECTED" % selected.size() if selected.size() > 1 else (entities[0].name.to_upper() if entities.size() == 1 else "COMMAND YOUR EXPEDITION")
+	selection_icon.texture = Icons.texture(entities[0].type if entities.size() == 1 else "people")
 	var signature = str(selected)+mode+str(queue_orders)
 	stat_row.visible = not entities.is_empty()
 	info_label.text = "Select a unit or building."
@@ -880,43 +900,45 @@ func refresh_ui():
 	clear_children(actions)
 	arrange_actions.call_deferred()
 	if mode == "build":
-		actions.add_child(button("Confirm site",confirm_build))
-		actions.add_child(button("Cancel",func(): mode = ""; placement_ready = false; view.ghost.visible = false))
+		actions.add_child(command_button("Confirm site",confirm_build))
+		actions.add_child(command_button("Cancel",func(): mode = ""; placement_ready = false; view.ghost.visible = false))
 		return
 	if entities.is_empty():
-		actions.add_child(button("Field guide",func(): show_guide()))
-		actions.add_child(button("Select army",func(): selected = sim.own(0).filter(func(e): return e.kind == "unit" and e.type != "worker").map(func(e): return e.id)))
-		actions.add_child(button("Select workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker").map(func(e): return e.id)))
-		actions.add_child(button("Idle workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker" and e.orders.is_empty()).map(func(e): return e.id)))
+		actions.add_child(command_button("Field guide",func(): show_guide()))
+		actions.add_child(command_button("Select army",func(): selected = sim.own(0).filter(func(e): return e.kind == "unit" and e.type != "worker").map(func(e): return e.id),"","people","Army"))
+		actions.add_child(command_button("Select workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker").map(func(e): return e.id),"","worker","Workers"))
+		actions.add_child(command_button("Idle workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker" and e.orders.is_empty()).map(func(e): return e.id)))
 		return
 	var e = entities[0]
-	if e.kind != "building" or entities.size() > 1: actions.add_child(button("Info & stats",func(): show_guide(e.type)))
+	if e.kind != "building" or entities.size() > 1: actions.add_child(command_button("Info & stats",func(): show_guide(e.type)))
 	if entities.size() == 1 and e.kind == "building":
 		for type in e.get("trains",[]):
 			var d = Catalog.get_def(type)
-			var train = button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type),hotkey_config.actionKeys[e.trains.find(type)])
+			var short_name = {"upgrade":"Weapons +","antitank":"Anti-tank"}.get(type,d.name)
+			var train = command_button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type),hotkey_config.actionKeys[e.trains.find(type)],type,short_name,d.cost)
 			train.set_meta("work_action","train"); actions.add_child(train)
-		actions.add_child(button("Info & stats",func(): show_guide(e.type)))
+		actions.add_child(command_button("Info & stats",func(): show_guide(e.type)))
 		var cost = sim.level_cost(e)
-		var upgrade = button("Upgrade L%d · %d/%d" % [e.level+1,cost[0],cost[1]] if e.level < 3 else "Maximum level 3",func(): sim.upgrade_building(e.id))
+		var upgrade = command_button("Upgrade L%d · %d/%d" % [e.level+1,cost[0],cost[1]] if e.level < 3 else "Maximum level 3",func(): sim.upgrade_building(e.id),"","upgrade","Upgrade L%d" % (e.level+1) if e.level < 3 else "Max level",cost if e.level < 3 else [])
 		upgrade.set_meta("work_action","upgrade"); actions.add_child(upgrade)
-		upgrade.set_meta("stable_width",180)
+		upgrade.set_meta("stable_width",144)
 		refresh_work_actions.call_deferred(e)
 	else:
 		if entities.any(func(u): return u.type == "worker"):
-			actions.add_child(button("Attack",func(): run_shortcut("attack"),"N"))
-			actions.add_child(button("Move",func(): run_shortcut("move"),"M"))
+			actions.add_child(command_button("Attack",func(): run_shortcut("attack"),"N"))
+			actions.add_child(command_button("Move",func(): run_shortcut("move"),"M"))
 			for type in ["relay","barracks","foundry","tower","hq"]:
 				var d = Catalog.get_def(type)
-				actions.add_child(button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type),hotkey_config.actionKeys[["relay","barracks","foundry","tower","hq"].find(type)]))
+				var short_name = {"hq":"Core","tower":"Tower"}.get(type,d.name)
+				actions.add_child(command_button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type),hotkey_config.actionKeys[["relay","barracks","foundry","tower","hq"].find(type)],type,short_name,d.cost))
 		else:
-			if entities.any(func(u): return u.get("support",0) > 0): actions.add_child(button("Support",func(): mode = "support"))
-			actions.add_child(button("Move",func(): mode = "move"))
-			actions.add_child(button("Attack-move",func(): mode = "attack"))
+			if entities.any(func(u): return u.get("support",0) > 0): actions.add_child(command_button("Support",func(): mode = "support","","engineer" if e.type == "engineer" else "medic"))
+			actions.add_child(command_button("Move",func(): mode = "move"))
+			actions.add_child(command_button("Attack-move",func(): mode = "attack"))
 		if entities.any(func(u): return u.kind == "unit" and u.type != "worker" and u.get("damage",0) > 0):
-			actions.add_child(button("Patrol",func(): run_shortcut("patrol"),"P"))
-		actions.add_child(button("Stop",func(): run_shortcut("stop")))
-		actions.add_child(button("Queue: ON" if queue_orders else "Queue: OFF",func(): queue_orders = not queue_orders))
+			actions.add_child(command_button("Patrol",func(): run_shortcut("patrol"),"P"))
+		actions.add_child(command_button("Stop",func(): run_shortcut("stop")))
+		actions.add_child(command_button("Queue: ON" if queue_orders else "Queue: OFF",func(): queue_orders = not queue_orders,"","queue","Queue on" if queue_orders else "Queue off"))
 
 func refresh_queue(e: Dictionary):
 	var visible_queue = not e.is_empty() and e.kind == "building"
@@ -966,6 +988,7 @@ func refresh_queue(e: Dictionary):
 			item.set_meta("work_kind",kind)
 			var names = {"worker":"H","vanguard":"V","ranger":"R","medic":"M+","antitank":"AT","breaker":"B","engineer":"E","tank":"T","upgrade":"W"}
 			item.glyph = "↑" if kind == "level" else ("⌂" if kind == "site" else names.get(job.type,"?"))
+			item.work_icon = Icons.texture("upgrade" if kind == "level" else job.type)
 			queue_strip.add_child(item)
 	for i in range(jobs.size()):
 		var job = jobs[i]
@@ -1118,6 +1141,7 @@ func publish_state():
 	state.selection_info = " · ".join(stat_labels.filter(func(l): return l.visible).map(func(l): return l.text.replace("\n"," ")))+" · "+info_label.text if stat_row.visible else info_label.text
 	state.selection_status = info_label.text
 	state.stat_cells = stat_labels.filter(func(l): return l.is_visible_in_tree()).map(func(l): return {"text":l.text,"x":l.global_position.x,"y":l.global_position.y,"w":l.size.x,"h":l.size.y,"lines":l.get_line_count(),"text_width":l.get_theme_font("font").get_string_size(l.text.get_slice("\n",1),HORIZONTAL_ALIGNMENT_LEFT,-1,l.get_theme_font_size("font_size")).x})
+	state.stat_icons = stat_labels.filter(func(l): return l.is_visible_in_tree()).map(func(l): return l.icon_key)
 	state.selection_info_rect = [info_label.global_position.x,info_label.global_position.y,info_label.size.x,info_label.size.y]
 	state.selection_info_lines = info_label.get_line_count()
 	state.guide_open = is_instance_valid(guide_panel)
@@ -1151,9 +1175,14 @@ func collect_buttons(node: Node,list: Array):
 	if node is Button and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
 		list.append({"text":node.get_meta("command_label",node.text),"display_text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
+		if node is CommandTile:
+			list[-1].icon = node.icon_key
+			list[-1].caption = node.caption
+			list[-1].caption_fits = node.get_theme_font("font").get_string_size(node.caption,HORIZONTAL_ALIGNMENT_LEFT,-1,12).x <= node.size.x-41-node.key_space
 		if node is WorkButton:
 			list[-1].work_progress = node.progress
 			list[-1].work_glyph = node.glyph
+			list[-1].work_icon = node.work_icon != null
 			list[-1].red_rect = [rect.position.x+1,rect.position.y+35,rect.size.x-2,8]
 	for child in node.get_children(): collect_buttons(child,list)
 

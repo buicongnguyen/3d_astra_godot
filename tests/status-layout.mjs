@@ -29,8 +29,13 @@ try{
     const s=await state(),r=s.selection_info_rect,a=s.action_rect;
     assert.equal(s.selection_info_lines,1,'activity stays on one line');
     assert.ok(s.stat_cells.every(c=>c.lines===2&&c.text_width<=c.w+1&&c.x>=0&&c.x+c.w<=viewport.width&&c.y+c.h<=r[1]),JSON.stringify(s.stat_cells));
+    assert.deepEqual(s.stat_icons.slice(0,3),['health','shield','crosshair'],'selected stats have consistent icons');
+    assert.ok(s.action_buttons.every(b=>b.icon&&b.caption_fits&&b.h>=44),'command icons and complete labels fit tap targets: '+JSON.stringify(s.action_buttons));
     assert.ok(r[1]+r[3]<=a[1]||r[0]+r[2]<=a[0],'stats do not overlap commands');
-    if(mobile)assert.ok(s.action_buttons.every(b=>b.x>=a[0]&&b.y>=a[1]&&b.y+b.h<=a[1]+a[3]+1),JSON.stringify({a,buttons:s.action_buttons}));
+    if(mobile){
+     assert.ok(s.action_buttons.every(b=>b.x>=a[0]&&b.x+b.w<=a[0]+a[2]+1&&b.y>=a[1]&&b.y+b.h<=a[1]+a[3]+1),JSON.stringify({a,buttons:s.action_buttons}));
+     if(s.action_buttons.length>=2)assert.ok(s.action_buttons[0].y===s.action_buttons[1].y&&s.action_buttons[0].x+s.action_buttons[0].w<s.action_buttons[1].x,'two separate command tiles per row');
+    }
     return s;
    };
    s=await check();const q=s.queue_buttons;assert.equal(q.length,5);
@@ -38,7 +43,7 @@ try{
    assert.ok(q.every(b=>s.selection_info_rect[1]+s.selection_info_rect[3]<=b.y),'queue below activity');
    assert.ok(q.every(b=>b.y+b.h<=s.action_rect[1]||b.x+b.w<=s.action_rect[0]),'queue separate from commands');
    await page.screenshot({path:`test-results/status-queue-${viewport.width}x${viewport.height}.png`});
-   assert.ok(q.every(b=>b.display_text===''&&b.work_glyph.length<=2),'no verbose work labels');
+   assert.ok(q.every(b=>b.display_text===''&&b.work_icon),'queue uses unit icons instead of verbose labels');
    assert.ok(q[0].work_progress>0&&q[0].work_progress<1,'blocks represent progress');
    const b=q[4],money=s.alloy;await page[mobile?'touchscreen':'mouse'][mobile?'tap':'click'](b.red_rect[0]+b.red_rect[2]/2,b.red_rect[1]+b.red_rect[3]/2);
    await page.waitForFunction(n=>frontierState.alloy===n+50,money);
@@ -58,7 +63,7 @@ try{
    await page.waitForFunction(n=>frontierState.alloy===n+200,paid);
    assert.deepEqual(commands(await state()),idleCommands,'cancelling upgrades preserves commands');
    await cmd({action:'patrol_setup'});
-   for(const type of ['medic','tank','group']){
+   for(const type of ['worker','medic','tank','group']){
     const units=(await state()).entities.filter(e=>e.team===0&&['worker','ranger','tank','medic'].includes(e.type));
     await cmd({action:'select',ids:type==='group'?units.map(e=>e.id):[units.find(e=>e.type===type).id]});await check();
    }
