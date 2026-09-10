@@ -34,6 +34,10 @@ var title_label: Label
 var resource_label: Label
 var selection_label: Label
 var info_label: Label
+var stat_row: HBoxContainer
+var stat_labels: Array = []
+var queue_strip: HBoxContainer
+var queue_signature = ""
 var notice: Label
 var actions: HFlowContainer
 var nav_buttons: HBoxContainer
@@ -227,9 +231,25 @@ func make_ui():
 	selection_label = label("SELECT YOUR EXPEDITION",18)
 	bottom.add_child(selection_label)
 	info_label = label("",13)
-	# Wrap before the first layout so single-line minimum width cannot enlarge the label.
-	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	info_label.autowrap_mode = TextServer.AUTOWRAP_OFF
+	info_label.clip_text = true
+	info_label.mouse_filter = Control.MOUSE_FILTER_PASS
 	bottom.add_child(info_label)
+	stat_row = HBoxContainer.new()
+	stat_row.add_theme_constant_override("separation",6)
+	bottom.add_child(stat_row)
+	for title in ["HP","Shield","ATK","Restore"]:
+		var value = label(title,12)
+		value.clip_text = true
+		value.mouse_filter = Control.MOUSE_FILTER_PASS
+		value.autowrap_mode = TextServer.AUTOWRAP_OFF
+		value.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		stat_row.add_child(value)
+		stat_labels.append(value)
+	queue_strip = HBoxContainer.new()
+	queue_strip.add_theme_constant_override("separation",4)
+	queue_strip.visible = false
+	bottom.add_child(queue_strip)
 	actions = HFlowContainer.new()
 	actions.add_theme_constant_override("h_separation",6)
 	actions.add_theme_constant_override("v_separation",6)
@@ -309,7 +329,7 @@ func layout():
 	resource_label.position = Vector2(12,35 if narrow else 36)
 	resource_label.add_theme_font_size_override("font_size",11 if size.x < 360 or landscape_layout else (13 if narrow else 15))
 	nav_buttons.position = Vector2(12,57) if narrow else Vector2(size.x-330,12)
-	var height = 235 if narrow else (145 if size.y < 520 else 170)
+	var height = 250 if narrow else 170
 	bottom.position = Vector2(10,size.y-height-10)
 	bottom.size = Vector2(size.x-20,height)
 	if landscape_layout:
@@ -318,11 +338,15 @@ func layout():
 		height = bottom.size.y
 	selection_label.position = Vector2(12,10)
 	selection_label.add_theme_font_size_override("font_size",15 if narrow else 18)
-	info_label.position = Vector2(12,36)
-	info_label.size = Vector2(bottom.size.x-24,38)
-	info_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	action_scroll.position = Vector2(12,76 if narrow else 63)
-	action_scroll.size = Vector2(bottom.size.x-24,height-action_scroll.position.y-10)
+	stat_row.position = Vector2(12,34)
+	stat_row.size = Vector2(minf(300,bottom.size.x-24),37)
+	info_label.position = Vector2(12,73)
+	info_label.size = Vector2(bottom.size.x-24 if narrow else 300,17)
+	info_label.add_theme_font_size_override("font_size",12)
+	queue_strip.position = Vector2(12,92)
+	queue_strip.size = Vector2(minf(300,bottom.size.x-24),44)
+	action_scroll.position = Vector2(12,140 if queue_strip.visible else 92) if narrow else Vector2(324,12)
+	action_scroll.size = Vector2(bottom.size.x-action_scroll.position.x-12,height-action_scroll.position.y-10)
 	action_pager.position = Vector2(12,height-54)
 	action_pager.size = Vector2(bottom.size.x-24,44)
 	if mobile_layout: action_scroll.size.y = action_pager.position.y-action_scroll.position.y-8
@@ -357,7 +381,7 @@ func layout():
 func arrange_actions():
 	if not is_instance_valid(action_pager): return
 	var count = actions.get_child_count()
-	var per_page = 4 if landscape_layout else 2
+	var per_page = mini(4 if landscape_layout else 2,maxi(1,floori((action_scroll.size.y+6)/50)))
 	action_pages = maxi(1,ceili(float(count)/per_page)) if mobile_layout else 1
 	action_page = clampi(action_page,0,action_pages-1)
 	action_pager.visible = mobile_layout and count > 0
@@ -767,17 +791,33 @@ func refresh_ui():
 	for id in known_buildings.keys():
 		if sim.seen(known_buildings[id].p) and sim.entity(id).is_empty(): known_buildings.erase(id)
 	var entities = selected.map(func(id): return sim.entity(id))
+	refresh_queue(entities[0] if entities.size() == 1 else {})
 	selection_label.text = "%d UNITS SELECTED" % selected.size() if selected.size() > 1 else (entities[0].name.to_upper() if entities.size() == 1 else "COMMAND YOUR EXPEDITION")
 	var signature = str(selected)+mode+str(queue_orders)
-	info_label.text = "Select troops or a building. Harvest alloy and energy to expand."
+	stat_row.visible = not entities.is_empty()
+	info_label.text = "Select a unit or building."
 	if not entities.is_empty():
 		var e = entities[0]
 		selection_label.text += " · L%d" % e.level if e.kind == "building" else ""
-		info_label.text = "HP %d/%d · Shield %d/%d · ATK %s" % [e.hp,e.max_hp,e.shield,e.max_shield,str(snappedf(sim.attack_value(e),0.1))]
-		if e.get("support",0) > 0: info_label.text += " · Restore %d HP/s" % e.support
-		if not e.level_job.is_empty(): info_label.text += " · Upgrading L%d: %d%%" % [e.level+1,100*e.level_job.elapsed/e.level_job.time]
-		if not e.complete: info_label.text += " · Building %d%%" % (e.progress*100)
-		if not e.queue.is_empty(): info_label.text += " · %s %d%% %s" % [Catalog.get_def(e.queue[0].type).name,mini(100,int(e.queue[0].elapsed/Catalog.get_def(e.queue[0].type).time*100)),e.queue[0].blocked]
+		var hp = 0.0; var max_hp = 0.0; var shield = 0.0; var max_shield = 0.0
+		for item in entities:
+			hp += item.hp; max_hp += item.max_hp; shield += item.shield; max_shield += item.max_shield
+		stat_labels[0].text = "HP\n%s/%s" % [compact_stat(hp),compact_stat(max_hp)]
+		stat_labels[0].tooltip_text = "Health %d of %d" % [ceili(hp),max_hp]
+		stat_labels[1].text = "Shield\n%s/%s" % [compact_stat(shield),compact_stat(max_shield)]
+		stat_labels[1].tooltip_text = "Shield %d of %d" % [ceili(shield),max_shield]
+		stat_labels[2].text = "%s\n%s" % ["ATK*" if entities.size() > 1 else "ATK",str(snappedf(sim.attack_value(e),0.1))]
+		stat_labels[2].tooltip_text = "Attack of first selected unit" if entities.size() > 1 else "Attack damage per hit"
+		stat_labels[3].visible = entities.size() == 1 and e.get("support",0) > 0
+		stat_labels[3].text = "Restore\n%d/s" % e.get("support",0)
+		info_label.text = "Operational" if e.kind == "building" else ("Standing by" if e.orders.is_empty() else e.orders[0].type.capitalize())
+		if e.carry > 0: info_label.text = "Cargo %d/10 %s" % [e.carry,e.carry_type]
+		if not e.complete: info_label.text = "Building %d%%" % (e.progress*100)
+		elif not e.level_job.is_empty(): info_label.text = "Upgrade L%d · %d%%" % [e.level+1,100*e.level_job.elapsed/e.level_job.time]
+		elif not e.queue.is_empty():
+			var q = e.queue[0]
+			info_label.text = "%s %d%% · %s" % [Catalog.get_def(q.type).name,mini(100,int(q.elapsed/Catalog.get_def(q.type).time*100)),q.blocked if q.blocked != "" else "Cancel queue %d/5" % e.queue.size()]
+		info_label.tooltip_text = info_label.text
 		signature += str(e.complete)+str(e.queue.map(func(q): return q.id))+str(e.level)+str(e.level_job.is_empty())
 	if mode == "build":
 		var error = sim.placement(building_type,placement_point) if placement_ready or not touch_active else ""
@@ -810,18 +850,14 @@ func refresh_ui():
 	if entities.size() == 1 and e.kind == "building":
 		if not e.complete:
 			actions.add_child(button("Cancel site · 75% refund",func(): sim.cancel_building(e.id)))
-		for i in range(e.queue.size()):
-			var job_id = e.queue[i].id
-			var job_name = Catalog.get_def(e.queue[i].type).name
-			actions.add_child(button("Cancel %s #%d · refund" % [job_name,i+1],func():
-				if sim.cancel_job(e.id,job_id): sim.message = job_name+" cancelled · full refund."
-			))
-	actions.add_child(button("Info & stats",func(): show_guide(e.type)))
+			actions.add_child(button("Info & stats",func(): show_guide(e.type)))
+	if e.kind != "building" or entities.size() > 1: actions.add_child(button("Info & stats",func(): show_guide(e.type)))
 	if entities.size() == 1 and e.kind == "building":
 		if e.complete:
 			for type in e.get("trains",[]):
 				var d = Catalog.get_def(type)
 				actions.add_child(button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type),hotkey_config.actionKeys[e.trains.find(type)]))
+			actions.add_child(button("Info & stats",func(): show_guide(e.type)))
 			if not e.level_job.is_empty(): actions.add_child(button("Cancel upgrade",func(): sim.cancel_level(e.id)))
 			elif e.level < 3:
 				var cost = sim.level_cost(e)
@@ -841,6 +877,44 @@ func refresh_ui():
 			actions.add_child(button("Patrol",func(): run_shortcut("patrol"),"P"))
 		actions.add_child(button("Stop",func(): run_shortcut("stop")))
 		actions.add_child(button("Queue: ON" if queue_orders else "Queue: OFF",func(): queue_orders = not queue_orders))
+
+func refresh_queue(e: Dictionary):
+	var visible_queue = not e.is_empty() and e.kind == "building" and not e.queue.is_empty()
+	if queue_strip.visible != visible_queue:
+		queue_strip.visible = visible_queue
+		layout.call_deferred()
+	if not visible_queue:
+		queue_signature = ""
+		return
+	var signature = str(e.id)+str(e.queue.map(func(q): return [q.id,q.type]))
+	if queue_signature != signature:
+		queue_signature = signature
+		clear_children(queue_strip)
+		for i in range(e.queue.size()):
+			var job_id = e.queue[i].id
+			var job_name = Catalog.get_def(e.queue[i].type).name
+			var item = button("",func():
+				if not paused and sim.cancel_job(e.id,job_id): sim.message = job_name+" cancelled · full refund."
+			)
+			item.custom_minimum_size = Vector2(44,44)
+			item.add_theme_font_size_override("font_size",11)
+			for state in ["normal","hover","pressed","disabled","focus"]:
+				var style = item.get_theme_stylebox(state).duplicate()
+				style.content_margin_left = 3; style.content_margin_right = 3
+				style.content_margin_top = 3; style.content_margin_bottom = 3
+				item.add_theme_stylebox_override(state,style)
+			item.set_meta("command_label","Cancel %s #%d · refund" % [job_name,i+1])
+			item.tooltip_text = "Cancel %s #%d · full refund" % [job_name,i+1]
+			queue_strip.add_child(item)
+	var names = {"worker":"Hrv","vanguard":"Vgd","ranger":"Rng","medic":"Med","antitank":"AT","breaker":"Brk","engineer":"Eng","tank":"Tank","upgrade":"Tech"}
+	for i in range(e.queue.size()):
+		var q = e.queue[i]
+		var item = queue_strip.get_child(i)
+		item.text = "%s %d\n%s" % [names.get(q.type,q.type.left(3)),i+1,"Wait" if q.blocked != "" else "%d%%" % mini(100,int(100*q.elapsed/Catalog.get_def(q.type).time))]
+		item.disabled = paused or not started or sim.result != ""
+
+func compact_stat(value: float) -> String:
+	return ("%.1fk" % (value/1000) if value < 100000 else "%dk" % roundi(value/1000)) if value >= 10000 else str(ceili(value))
 
 func _process(dt):
 	if not sim: return
@@ -967,7 +1041,9 @@ func publish_state():
 	state.last_key = last_key
 	state.groups = groups
 	state.notice = notice.text
-	state.selection_info = info_label.text
+	state.selection_info = " · ".join(stat_labels.filter(func(l): return l.visible).map(func(l): return l.text.replace("\n"," ")))+" · "+info_label.text if stat_row.visible else info_label.text
+	state.selection_status = info_label.text
+	state.stat_cells = stat_labels.filter(func(l): return l.is_visible_in_tree()).map(func(l): return {"text":l.text,"x":l.global_position.x,"y":l.global_position.y,"w":l.size.x,"h":l.size.y,"lines":l.get_line_count(),"text_width":l.get_theme_font("font").get_string_size(l.text.get_slice("\n",1),HORIZONTAL_ALIGNMENT_LEFT,-1,l.get_theme_font_size("font_size")).x})
 	state.selection_info_rect = [info_label.global_position.x,info_label.global_position.y,info_label.size.x,info_label.size.y]
 	state.selection_info_lines = info_label.get_line_count()
 	state.guide_open = is_instance_valid(guide_panel)
@@ -977,6 +1053,8 @@ func publish_state():
 	state.action_pages = action_pages
 	state.action_buttons = []
 	collect_buttons(actions,state.action_buttons)
+	state.queue_buttons = []
+	collect_buttons(queue_strip,state.queue_buttons)
 	state.action_rect = [action_scroll.global_position.x,action_scroll.global_position.y,action_scroll.size.x,action_scroll.size.y]
 	state.ui_action_serial = ui_action_serial
 	state.minimap_rect = [minimap_rect.position.x,minimap_rect.position.y,minimap_rect.size.x,minimap_rect.size.y]
@@ -996,7 +1074,7 @@ func publish_state():
 func collect_buttons(node: Node,list: Array):
 	if node is Button and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
-		list.append({"text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
+		list.append({"text":node.get_meta("command_label",node.text),"display_text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
 	for child in node.get_children(): collect_buttons(child,list)
 
 func shortcut_actions() -> Array:

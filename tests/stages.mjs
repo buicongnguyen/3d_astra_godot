@@ -25,7 +25,7 @@ try{
     await page.waitForFunction(id=>window.frontierState.map_id===id,id);
     await cmd({action:'select',ids:[]});
     const s=await page.evaluate(()=>window.frontierState);assert.equal(s.map_size,size);
-    if(mobile){assert.ok(s.selection_info_rect[0]+s.selection_info_rect[2]<=390-10,"selection description stays inside phone panel");assert.ok(s.selection_info_lines>=2,"opening description wraps on phones");}
+    if(mobile){assert.ok(s.selection_info_rect[0]+s.selection_info_rect[2]<=390-10,"selection status stays inside phone panel");assert.equal(s.selection_info_lines,1,"selection status stays on one line");assert.ok(s.stat_cells.every(c=>c.lines===2),"each stat has a label and an unwrapped value");}
     assert.equal(s.entities.filter(e=>e.type==='alloy'||e.type==='energy').length,12+sites*6);
     assert.ok(Math.abs(s.focus[0]-(-20-offset))<2);
     if(id==='expanse'){

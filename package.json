@@ -10,7 +10,8 @@
     "test:harvesters": "node tests/harvesters.mjs",
     "test:hotkeys": "node tests/hotkeys.mjs",
     "test:patrol": "node tests/patrol.mjs",
-    "test:activity": "node tests/activity.mjs"
+    "test:activity": "node tests/activity.mjs",
+    "test:status-layout": "node tests/status-layout.mjs"
   },
   "devDependencies": {
     "playwright": "1.58.2"
