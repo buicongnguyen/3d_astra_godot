@@ -7,7 +7,8 @@
     "test:browser": "node tests/browser.mjs",
     "test:mobile-density": "node tests/mobile-density.mjs",
     "test:stages": "node tests/stages.mjs",
-    "test:harvesters": "node tests/harvesters.mjs"
+    "test:harvesters": "node tests/harvesters.mjs",
+    "test:hotkeys": "node tests/hotkeys.mjs"
   },
   "devDependencies": {
     "playwright": "1.58.2"

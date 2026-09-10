@@ -55,6 +55,7 @@ jobs:
           npm run test:mobile-density
           MOBILE_DPR=1 npm run test:stages
           npm run test:harvesters
+          npm run test:hotkeys
       - uses: actions/upload-artifact@v4
         if: always()
         with:

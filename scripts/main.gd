@@ -68,8 +68,14 @@ var touch_device = false
 var landscape_layout = false
 var guide_panel: Panel
 var guide_was_paused = true
+var hotkey_config = JSON.parse_string(FileAccess.get_file_as_string("res://data/hotkeys.json"))
+var last_group = 0
+var last_group_time = 0
 
 func _input(event):
+	if event is InputEventKey and handle_hotkey(event):
+		get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed: last_key = "%d/%d shift=%s ctrl=%s" % [event.keycode,event.physical_keycode,event.shift_pressed,event.ctrl_pressed]
 	# Releases over HUD do not reach _unhandled_input; clear captured gestures here.
 	if event is InputEventMouseButton and not event.pressed:
@@ -161,11 +167,27 @@ func label(text: String,font_size: int = 15) -> Label:
 	l.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return l
 
-func button(text: String,callback: Callable) -> Button:
+func button(text: String,callback: Callable,key: String = "") -> Button:
 	var b = Button.new()
 	b.text = text
 	b.custom_minimum_size = Vector2(0,44)
 	b.add_theme_font_size_override("font_size",14)
+	if key == "":
+		var aliases = {"Home":"H","Move":"M","Attack-move":"F","Support":"R","Stop":"X","Info & stats":"I","Field guide":"I","Pause":"Space","Select army":"F2","Select workers":"F3","Idle workers":"F1","Cancel upgrade":"Backspace","Cancel site · 75% refund":"Backspace"}
+		key = aliases.get(text,"")
+		if text.begins_with("Upgrade L"): key = "U"
+		if text.begins_with("Queue:"): key = "O"
+	if key != "":
+		b.tooltip_text = key+" · "+text
+		var hint = Label.new()
+		hint.text = key; hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		hint.add_theme_font_size_override("font_size",9)
+		hint.add_theme_color_override("font_color",Color("a5e3bf"))
+		b.add_child(hint)
+		hint.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+		hint.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+		hint.position.y = 1; hint.position.x = -5-hint.get_minimum_size().x
+		hint.visible = not touch_device
 	b.pressed.connect(func():
 		callback.call()
 		ui_action_serial += 1
@@ -195,10 +217,11 @@ func make_ui():
 	header.add_child(resource_label)
 	nav_buttons = HBoxContainer.new()
 	header.add_child(nav_buttons)
-	nav_buttons.add_child(button("Home",func(): view.focus = Vector2(-25-sim.map_config.offset,24+sim.map_config.offset)))
+	nav_buttons.add_child(button("Home",func(): run_shortcut("hq")))
 	nav_buttons.add_child(button("−",func(): view.zoom += 5))
 	nav_buttons.add_child(button("+",func(): view.zoom -= 5))
 	nav_buttons.add_child(button("Pause",toggle_pause))
+	nav_buttons.add_child(button("Keys",show_shortcuts,"?"))
 	bottom = Panel.new()
 	ui.add_child(bottom)
 	selection_label = label("SELECT YOUR EXPEDITION",18)
@@ -285,7 +308,7 @@ func layout():
 	title_label.add_theme_font_size_override("font_size",16 if narrow else 20)
 	resource_label.position = Vector2(12,35 if narrow else 36)
 	resource_label.add_theme_font_size_override("font_size",11 if size.x < 360 or landscape_layout else (13 if narrow else 15))
-	nav_buttons.position = Vector2(12,57) if narrow else Vector2(size.x-260,12)
+	nav_buttons.position = Vector2(12,57) if narrow else Vector2(size.x-330,12)
 	var height = 235 if narrow else (145 if size.y < 520 else 170)
 	bottom.position = Vector2(10,size.y-height-10)
 	bottom.size = Vector2(size.x-20,height)
@@ -360,7 +383,7 @@ func show_briefing():
 	scrim.visible = true
 	scenario.visible = true
 	modal_title.text = "FRONTIER COMMAND"
-	modal_desc.text = "MERIDIAN EXPEDITION · GODOT EDITION\n\nBuild an outpost. Command a mixed army. Cross the river and destroy the enemy Command core.\n\nDesktop: drag to select · right-click orders\nWASD pan · wheel zoom · Q attack-move\nTouch: tap select/order · drag pan · pinch zoom"
+	modal_desc.text = "MERIDIAN EXPEDITION · GODOT EDITION\n\nBuild an outpost. Command a mixed army. Cross the river and destroy the enemy Command core.\n\nDesktop: drag to select · right-click orders\nWASD pan · wheel zoom · F attack-move · B build · ? shortcuts\nTouch: tap select/order · drag pan · pinch zoom"
 	clear_children(modal_actions)
 	modal_actions.add_child(button("Deploy expedition",start_match))
 	modal_actions.add_child(button("Army & graphics settings",show_settings))
@@ -413,7 +436,7 @@ func toggle_pause():
 		touches.clear()
 		scenario.visible = false
 		modal_title.text = "EXPEDITION PAUSED"
-		modal_desc.text = "The battlefield is paused.\n\nX stops selected units. Shift queues orders.\nShift + 1–9 saves groups; 1–9 recalls.\nF focuses selection. H returns to base.\nSelect a building, then right-click for its rally point."
+		modal_desc.text = "The battlefield is paused.\n\nX stops selected units. Shift queues orders.\nCtrl + 1–9 saves groups; Shift adds; 1–9 recalls.\nHome focuses selection. H selects the core. B opens construction. Keys lists all shortcuts.\nSelect a building, then right-click for its rally point."
 		clear_children(modal_actions)
 		modal_actions.add_child(button("Resume",toggle_pause))
 		modal_actions.add_child(button("Army & graphics settings",show_settings))
@@ -573,12 +596,18 @@ func context_order(screen: Vector2,attack: bool = false):
 	var p = view.ground(screen)
 	var ids = selected.filter(func(id): return not sim.entity(id).is_empty() and sim.entity(id).kind == "unit")
 	if ids.is_empty():
+		mode = ""
 		for id in selected:
 			var b = sim.entity(id)
-			if not b.is_empty() and b.kind == "building":
+			if b.get("kind","") == "building" and b.complete and not b.get("trains",[]).is_empty():
 				b.rally = p.clamp(Vector2.ONE*(-sim.nav.half+3),Vector2.ONE*(sim.nav.half-3))
 				sim.message = "Rally point set. New units will move here."
 		return
+	if mode == "rally":
+		for id in selected:
+			var b = sim.entity(id)
+			if b.get("kind","") == "building" and b.complete and not b.get("trains",[]).is_empty(): b.rally = p
+		mode = ""; return
 	var order = {"type":"attackmove" if attack else "move","p":p}
 	if mode == "support":
 		var helpers = ids.filter(func(id): return sim.entity(id).get("support",0) > 0)
@@ -588,7 +617,7 @@ func context_order(screen: Vector2,attack: bool = false):
 		sim.issue(helpers,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
 		mode = ""
 		return
-	if not target.is_empty():
+	if not target.is_empty() and not mode in ["move","attack"]:
 		if target.get("team",-1) == 0:
 			sim.issue(ids,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
 			ids = ids.filter(func(id): return sim.entity(id).get("support",0) <= 0)
@@ -610,7 +639,7 @@ func click_world(point: Vector2,touch: bool = false):
 		placement_ready = true
 		if not touch: confirm_build()
 		return
-	if mode in ["attack","move","support"]:
+	if mode in ["attack","move","support","context","rally"]:
 		context_order(point,mode == "attack")
 		return
 	var target = view.pick(point)
@@ -661,17 +690,6 @@ func _unhandled_input(event):
 		else: toggle_pause()
 		return
 	if paused or not started or sim.result != "" or is_instance_valid(settings_panel): return
-	if event is InputEventKey and event.pressed and not event.echo:
-		if event.keycode == KEY_Q and not event.ctrl_pressed: mode = "attack"
-		if event.keycode == KEY_X: sim.issue(selected,{"type":"stop"})
-		if event.keycode == KEY_H: view.focus = Vector2(-25-sim.map_config.offset,24+sim.map_config.offset)
-		if event.keycode == KEY_F and not selected.is_empty():
-			var e = sim.entity(selected[0])
-			if not e.is_empty(): view.focus = e.p
-		var digit = event.physical_keycode if event.physical_keycode else event.keycode
-		if digit >= KEY_1 and digit <= KEY_9:
-			if event.ctrl_pressed or event.shift_pressed: groups[digit] = selected.duplicate()
-			else: selected = groups.get(digit,[]).filter(func(id): return not sim.entity(id).is_empty())
 	if event is InputEventMouseButton:
 		touch_active = false
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP: view.zoom -= 3
@@ -756,7 +774,9 @@ func refresh_ui():
 	if mode == "build":
 		var error = sim.placement(building_type,placement_point) if placement_ready or not touch_active else ""
 		notice.text = build_feedback if build_feedback != "" else (error if error != "" else "Place %s: %s" % [Catalog.get_def(building_type).name,"tap ground, then Confirm site." if touch_active else "click a valid site to build."])
-	else: notice.text = "Support: choose a friendly target to follow and restore." if mode == "support" else ("Attack-move: choose a destination." if mode == "attack" else sim.message)
+	else:
+		var mode_hints = {"support":"Support: choose a friendly target to follow and restore.","attack":"Attack-move: choose a destination.","move":"Move: choose a destination to withdraw.","context":"Context: choose a deposit, enemy or friendly construction site.","rally":"Rally: choose a destination for newly trained units."}
+		notice.text = mode_hints.get(mode,sim.message)
 	notice.add_theme_color_override("font_color",Color("ffd58a") if mode == "build" or sim.message.begins_with("Need ") or sim.message.begins_with("Build ") or sim.message.begins_with("Finish ") else Color("e1ebe2"))
 	if signature == action_signature: return
 	action_signature = signature
@@ -777,12 +797,12 @@ func refresh_ui():
 		return
 	var e = entities[0]
 	actions.add_child(button("Info & stats",func(): show_guide(e.type)))
-	if e.kind == "building":
+	if entities.size() == 1 and e.kind == "building":
 		if not e.complete: actions.add_child(button("Cancel site · 75% refund",func(): sim.cancel_building(e.id)))
 		else:
 			for type in e.get("trains",[]):
 				var d = Catalog.get_def(type)
-				actions.add_child(button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type)))
+				actions.add_child(button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type),hotkey_config.actionKeys[e.trains.find(type)]))
 			for i in range(e.queue.size()): actions.add_child(button("Cancel #"+str(i+1),func(): sim.cancel_queue(e.id,i)))
 			if not e.level_job.is_empty(): actions.add_child(button("Cancel upgrade",func(): sim.cancel_level(e.id)))
 			elif e.level < 3:
@@ -792,7 +812,7 @@ func refresh_ui():
 		if entities.any(func(u): return u.type == "worker"):
 			for type in ["relay","barracks","foundry","tower","hq"]:
 				var d = Catalog.get_def(type)
-				actions.add_child(button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type)))
+				actions.add_child(button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type),hotkey_config.actionKeys[["relay","barracks","foundry","tower","hq"].find(type)]))
 		else:
 			if entities.any(func(u): return u.get("support",0) > 0): actions.add_child(button("Support",func(): mode = "support"))
 			actions.add_child(button("Move",func(): mode = "move"))
@@ -809,7 +829,7 @@ func _process(dt):
 				sim.tick(0.05)
 				accumulator -= 0.05
 		var pan = Vector2(float(Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT))-float(Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)),float(Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN))-float(Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)))
-		view.focus += pan*view.zoom*0.65*dt
+		if not Input.is_key_pressed(KEY_CTRL) and not Input.is_key_pressed(KEY_ALT) and not Input.is_key_pressed(KEY_META): view.focus += pan*view.zoom*0.65*dt
 	view.selected = selected
 	view.refresh(dt if not paused else 0.0)
 	view.ghost.visible = mode == "build" and not paused
@@ -893,6 +913,7 @@ func publish_state():
 	var buttons = []
 	collect_buttons(ui,buttons)
 	var state = {"ready":true,"started":started,"paused":paused,"result":sim.result,"time":sim.time,"selected":selected,"population":sim.population(0),"alloy":sim.players[0].alloy,"energy":sim.players[0].energy,"entities":list,"buttons":buttons,"settings":settings,"settings_open":is_instance_valid(settings_panel),"models":view.objects.size(),"focus":[view.focus.x,view.focus.y],"zoom":view.zoom,"mode":mode,"viewport":[ui.size.x,ui.size.y]}
+	state.building_type = building_type
 	state.last_key = last_key
 	state.groups = groups
 	state.notice = notice.text
@@ -925,3 +946,151 @@ func collect_buttons(node: Node,list: Array):
 		var rect = node.get_global_rect()
 		list.append({"text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
 	for child in node.get_children(): collect_buttons(child,list)
+
+func shortcut_actions() -> Array:
+	var es = selected.map(func(id): return sim.entity(id)).filter(func(e): return not e.is_empty())
+	if es.size() == 1 and es[0].kind == "building" and es[0].complete: return es[0].get("trains",[])
+	if es.any(func(e): return e.type == "worker"): return ["relay","barracks","foundry","tower","hq"]
+	return []
+
+func focus_selection():
+	var es = selected.map(func(id): return sim.entity(id)).filter(func(e): return not e.is_empty())
+	if es.is_empty(): return
+	var center = Vector2.ZERO
+	for e in es: center += e.p
+	view.focus = center/es.size()
+
+func choose_shortcut(items: Array,cycle: bool = false):
+	if items.is_empty(): sim.message = "No matching units or buildings."; return
+	mode = ""; placement_ready = false; view.ghost.visible = false
+	if cycle:
+		var current = selected[0] if not selected.is_empty() else -1
+		var ids = items.map(func(e): return e.id)
+		selected = [ids[(ids.find(current)+1)%ids.size()]]
+		focus_selection()
+	else: selected = items.map(func(e): return e.id)
+
+func use_group(digit: int,assign: bool = false,add: bool = false):
+	if assign: groups[digit] = selected.duplicate()
+	elif add:
+		var merged = groups.get(digit,[]).duplicate()
+		for id in selected:
+			if not merged.has(id): merged.append(id)
+		groups[digit] = merged
+	else:
+		mode = ""; placement_ready = false
+		selected = groups.get(digit,[]).filter(func(id): return not sim.entity(id).is_empty())
+		if last_group == digit and Time.get_ticks_msec()-last_group_time < 400: focus_selection()
+		last_group = digit; last_group_time = Time.get_ticks_msec()
+	if assign or add: sim.message = "Control group %d %s." % [digit-KEY_0,"extended" if add else "assigned"]
+
+func run_shortcut(id: String):
+	if id == "pause": toggle_pause(); return
+	if not started or paused or sim.result != "": return
+	var own = sim.own(0)
+	var es = selected.map(func(i): return sim.entity(i)).filter(func(e): return not e.is_empty())
+	var e = es[0] if not es.is_empty() else {}
+	match id:
+		"build":
+			if not es.any(func(u): return u.type == "worker"):
+				var ws = own.filter(func(u): return u.type == "worker")
+				if ws.is_empty(): sim.message = "Select a Harvester to construct a building."; refresh_ui(); return
+				ws.sort_custom(func(a,b): return a.orders.size() < b.orders.size())
+				choose_shortcut(ws.slice(0,1))
+			mode = ""; placement_ready = false; action_page = 0
+			sim.message = "BUILD: Q Relay / E Barracks / R Foundry / T Tower / Y Core"
+		"move","attackmove","context","support","rally":
+			if not es.any(func(u): return (u.kind == "building" and u.complete and not u.get("trains",[]).is_empty()) if id == "rally" else u.kind == "unit"):
+				sim.message = "Select a completed production building first." if id == "rally" else "Select units first."
+			else: mode = "attack" if id == "attackmove" else id
+		"stop": mode = ""; sim.issue(selected,{"type":"stop"}); sim.message = "Orders cleared."
+		"deliver":
+			var ws = es.filter(func(u): return u.type == "worker" and u.carry > 0)
+			if ws.is_empty(): sim.message = "Select Harvesters carrying resources."
+			else: mode = ""; placement_ready = false; sim.issue(ws.map(func(u): return u.id),{"type":"deliver"},queue_orders)
+		"upgrade":
+			if e.get("kind","") == "building": sim.upgrade_building(e.id)
+			else: sim.message = "Select a building to upgrade."
+		"cancel":
+			if mode != "": mode = ""; placement_ready = false
+			elif e.get("kind","") == "building":
+				if not e.complete: sim.cancel_building(e.id)
+				elif not e.level_job.is_empty(): sim.cancel_level(e.id)
+				elif not e.queue.is_empty(): sim.cancel_queue(e.id,e.queue.size()-1)
+				else: sim.message = "No queued job to cancel."
+		"idle": choose_shortcut(own.filter(func(u): return u.type == "worker" and u.orders.is_empty()),true)
+		"army": choose_shortcut(own.filter(func(u): return u.kind == "unit" and u.type != "worker"))
+		"workers": choose_shortcut(own.filter(func(u): return u.type == "worker"))
+		"buildings": choose_shortcut(own.filter(func(u): return u.kind == "building"))
+		"hq","barracks","foundry": choose_shortcut(own.filter(func(u): return u.type == id),true)
+		"same":
+			if not e.is_empty(): choose_shortcut(own.filter(func(u): return u.type == e.type))
+		"all": choose_shortcut(own.filter(func(u): return u.kind == "unit"))
+		"clear": selected.clear(); mode = ""; placement_ready = false
+		"focus": focus_selection()
+		"queue": queue_orders = not queue_orders
+		"info": show_guide(e.get("type","hq"))
+		"zoom-in": view.zoom = maxf(20,view.zoom-4)
+		"zoom-out": view.zoom = minf(80,view.zoom+4)
+	refresh_ui()
+
+func handle_hotkey(event: InputEventKey) -> bool:
+	if not event.pressed or event.alt_pressed or event.meta_pressed: return false
+	var code = event.physical_keycode if event.physical_keycode else event.keycode
+	if is_instance_valid(guide_panel) or is_instance_valid(settings_panel): return false
+	var focus = get_viewport().gui_get_focus_owner()
+	if focus is LineEdit or focus is TextEdit or focus is OptionButton: return false
+	if code == KEY_SPACE and not event.ctrl_pressed:
+		if not event.echo: toggle_pause()
+		return true
+	if paused or not started or sim.result != "": return false
+	if code >= KEY_1 and code <= KEY_9:
+		if not event.echo: use_group(code,event.ctrl_pressed,event.shift_pressed)
+		return true
+	if event.ctrl_pressed:
+		if code != KEY_A: return false
+		if not event.echo: run_shortcut("all")
+		return true
+	var action_index = hotkey_config.actionKeys.find(OS.get_keycode_string(code).to_upper())
+	var available = shortcut_actions()
+	if mode == "" and action_index >= 0 and action_index < available.size():
+		if not event.echo:
+			var type = available[action_index]
+			if Catalog.get_def(type).get("kind","") == "building": begin_build(type)
+			else: sim.enqueue(selected[0],type)
+		return true
+	if code == KEY_SLASH:
+		if not event.echo: show_shortcuts()
+		return true
+	var key = OS.get_keycode_string(code).to_lower()
+	if code == KEY_PERIOD: key = "f1"
+	if code == KEY_QUOTELEFT: key = "`"
+	if code == KEY_EQUAL or code == KEY_KP_ADD: key = "+"
+	if code == KEY_MINUS or code == KEY_KP_SUBTRACT: key = "−"
+	if code == KEY_Q: # Preserve the old attack-move alias for combat selections.
+		if not event.echo and mode == "": run_shortcut("attackmove")
+		return true
+	for item in hotkey_config.commands:
+		if item.key.split(" / ")[0].to_lower() == key:
+			if not event.echo: run_shortcut(item.id)
+			return true
+	return false
+
+func show_shortcuts():
+	if is_instance_valid(guide_panel): return
+	guide_was_paused = paused; paused = true
+	guide_panel = Panel.new(); ui.add_child(guide_panel)
+	var scroll = ScrollContainer.new(); scroll.position = Vector2(16,16); guide_panel.add_child(scroll)
+	var body = VBoxContainer.new(); body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; scroll.add_child(body)
+	body.add_child(label("PC COMMANDS & SELECTION",20))
+	var instructions = label("Q E R T Y: displayed action tiles\nB: construction / WASD: camera / Esc: cancel\nCtrl+1-9: save / Shift+1-9: add / 1-9: recall\nPress a group number twice to focus. Hold Shift to queue orders.",13)
+	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; body.add_child(instructions)
+	for item in hotkey_config.commands:
+		body.add_child(button(item.label+" ["+item.key+"]",func(): close_guide(); run_shortcut(item.id)))
+	for digit in range(KEY_1,KEY_9+1):
+		body.add_child(button("Control group %d" % (digit-KEY_0),func():
+			close_guide()
+			if started and not paused and sim.result == "": use_group(digit,Input.is_key_pressed(KEY_CTRL),Input.is_key_pressed(KEY_SHIFT))
+		))
+	guide_panel.add_child(button("Close shortcuts",close_guide))
+	layout()
