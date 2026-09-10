@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 fs.mkdirSync('test-results', {recursive: true});
 const browser = await chromium.launch({headless: true, executablePath: process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : undefined, args: ['--enable-unsafe-swiftshader']});
+const mobileDPR = Number(process.env.MOBILE_DPR || 3);
 try {
   for (const mobile of [false, true]) {
     const layouts = mobile ? [{width: 320, height: 568}, {width: 390, height: 844}, {width: 667, height: 375}, {width: 844, height: 390}, {width: 768, height: 1024}] : [{width: 1280, height: 800}];
-    const page = await browser.newPage({viewport: layouts[0], hasTouch: mobile, isMobile: mobile, deviceScaleFactor: mobile ? 3 : 1});
+    const page = await browser.newPage({viewport: layouts[0], hasTouch: mobile, isMobile: mobile, deviceScaleFactor: mobile ? mobileDPR : 1});
     const errors = []; page.on('pageerror', e => errors.push(e.message)); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
     const state = () => page.evaluate(() => window.frontierState);
     const cmd = async c => { await page.evaluate(c => window.frontierCommand(JSON.stringify(c)), c); await page.waitForTimeout(250); };

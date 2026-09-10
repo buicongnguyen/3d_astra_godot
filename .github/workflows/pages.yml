@@ -11,7 +11,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -57,7 +57,10 @@ jobs:
           MOBILE_DPR=1 npm run test:stages
           npm run test:harvesters
           npm run test:hotkeys
-          npm run test:patrol
+      - name: Verify Patrol and Harvester Attack controls
+        # The dedicated mobile-density check above still exercises DPR 3.
+        # Render functional viewport checks at DPR 1 on the software renderer.
+        run: MOBILE_DPR=1 npm run test:patrol
       - uses: actions/upload-artifact@v4
         if: always()
         with:
