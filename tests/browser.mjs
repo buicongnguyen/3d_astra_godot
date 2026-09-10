@@ -56,8 +56,8 @@ for(const mobile of [false,true]){
  if(mobile)await page.touchscreen.tap(...roof);else await page.mouse.click(...roof);
  await page.waitForFunction(id=>window.frontierState.selected.length===1&&window.frontierState.selected[0]===id,hq.id);
  await press('Harvester · 50/0');assert.equal((await state()).population.reserved,1);
- await press('Cancel #1');assert.equal((await state()).population.reserved,0);
- if(mobile)assert.equal((await state()).action_page,1,'queue changes preserve the current action page');
+ await press('Cancel Harvester #1 · refund');assert.equal((await state()).population.reserved,0);
+ if(mobile)assert.equal((await state()).action_page,0,'cancellation is on the first action page');
  await press('Harvester · 50/0');await cmd({action:'step',seconds:9});assert.equal((await state()).population.used,8);
  const production=(await state()).entities.find(e=>e.type==='barracks'&&e.team===0);
  await cmd({action:'select',ids:[production.id]});
@@ -68,7 +68,7 @@ for(const mobile of [false,true]){
  assert.equal((await state()).mode,'');
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-construction-feedback.png`});
  await cmd({action:'select',ids:[production.id]});
- for(let i=0;i<3;i++)await press('Cancel #1');
+ for(let i=0;i<3;i++)await press('Cancel Ranger #1 · refund');
  console.log(`Production controls passed (${mobile?'mobile':'desktop'})`);
  await cmd({action:'start'}); // exercise real-time pause behavior independently of deterministic production checks
  const runningTime=(await state()).time;

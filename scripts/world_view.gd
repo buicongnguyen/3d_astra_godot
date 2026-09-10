@@ -1,5 +1,6 @@
 extends Node3D
 const Catalog = preload("res://scripts/catalog.gd")
+const Activity = preload("res://scripts/activity.gd")
 var sim
 var camera: Camera3D
 var focus = Vector2(-20,20)
@@ -11,6 +12,7 @@ var team_materials: Array = [{},{}]
 var colors: Array = [Color("92ebc5"),Color("ef7660")]
 var terrain: Node3D
 var effects: Array = []
+var activity_effects: Array = []
 var fog_texture: ImageTexture
 var fog_image: Image
 var fog_clock = 0.0
@@ -379,13 +381,14 @@ func refresh(dt: float):
 		o.root.position = Vector3(e.p.x,0.12 if sim.nav.river and absf(e.p.y) < 4 else 0,e.p.y)
 		o.root.visible = e.team == 0 or sim.seen(e.p)
 		o.model.rotation.y = e.angle
+		o.model.rotation.z = sin(sim.time*7+e.id)*0.045 if Activity.harvesting(sim,e) and water_motion else 0.0
 		o.model.scale = Vector3.ONE*(0.25+0.75*e.progress)
 		o.ring.visible = selected.has(e.id)
 		if e.kind == "building":
 			o.root.get_node("LevelBadge").text = "L%d" % e.level
 			o.root.get_node("LevelBadge").modulate = colors[e.team]
 		if o.animation:
-			var clip = "Walk" if e.moving else (("Work" if e.get("support",0) > 0 else "Attack") if e.cooldown > 0.1 else ("Work" if not e.orders.is_empty() and e.orders[0].type in ["gather","build"] else "Idle"))
+			var clip = "Walk" if e.moving else (("Work" if e.get("support",0) > 0 else "Attack") if e.cooldown > 0.1 else ("Work" if e.get("working",false) else "Idle"))
 			if o.clip != clip:
 				o.animation.play(clip,0.1)
 				o.clip = clip
@@ -412,6 +415,12 @@ func refresh(dt: float):
 		fog_clock = 0.25
 	for event in sim.events:
 		if not sim.seen(event.p): continue
+		if event.type in ["impact","death"]:
+			var effect = event.duplicate()
+			effect.max_life = 0.3 if event.type == "impact" else 0.65
+			effect.life = effect.max_life
+			activity_effects.append(effect)
+			if activity_effects.size() > 32: activity_effects.pop_front()
 		if event.type in ["shot","support"]:
 			var a = Vector3(event.p.x,1.2,event.p.y)
 			var b = Vector3(event.to.x,1.2,event.to.y)
@@ -419,6 +428,8 @@ func refresh(dt: float):
 			if a.distance_to(b) > 0.001: line.look_at(b)
 			effects.append({"node":line,"life":0.12})
 	sim.events.clear()
+	for effect in activity_effects: effect.life -= dt
+	activity_effects = activity_effects.filter(func(e): return e.life > 0)
 	for effect in effects.duplicate():
 		var animation = find_animation(effect.node)
 		if animation: animation.speed_scale = 1.0 if dt > 0 else 0.0

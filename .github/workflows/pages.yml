@@ -39,6 +39,7 @@ jobs:
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/expansion_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/review_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/patrol_test.gd
+          Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/activity_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/harvesters_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/assets_test.gd
       - name: Export Web and Windows
@@ -61,6 +62,8 @@ jobs:
         # The dedicated mobile-density check above still exercises DPR 3.
         # Render functional viewport checks at DPR 1 on the software renderer.
         run: MOBILE_DPR=1 npm run test:patrol
+      - name: Verify construction and harvesting feedback
+        run: MOBILE_DPR=1 npm run test:activity
       - uses: actions/upload-artifact@v4
         if: always()
         with:

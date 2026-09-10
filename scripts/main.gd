@@ -778,7 +778,7 @@ func refresh_ui():
 		if not e.level_job.is_empty(): info_label.text += " · Upgrading L%d: %d%%" % [e.level+1,100*e.level_job.elapsed/e.level_job.time]
 		if not e.complete: info_label.text += " · Building %d%%" % (e.progress*100)
 		if not e.queue.is_empty(): info_label.text += " · %s %d%% %s" % [Catalog.get_def(e.queue[0].type).name,mini(100,int(e.queue[0].elapsed/Catalog.get_def(e.queue[0].type).time*100)),e.queue[0].blocked]
-		signature += str(e.complete)+str(e.queue.map(func(q): return q.type))+str(e.level)+str(e.level_job.is_empty())
+		signature += str(e.complete)+str(e.queue.map(func(q): return q.id))+str(e.level)+str(e.level_job.is_empty())
 	if mode == "build":
 		var error = sim.placement(building_type,placement_point) if placement_ready or not touch_active else ""
 		notice.text = build_feedback if build_feedback != "" else (error if error != "" else "Place %s: %s" % [Catalog.get_def(building_type).name,"tap ground, then Confirm site." if touch_active else "click a valid site to build."])
@@ -806,14 +806,22 @@ func refresh_ui():
 		actions.add_child(button("Idle workers",func(): selected = sim.own(0).filter(func(e): return e.type == "worker" and e.orders.is_empty()).map(func(e): return e.id)))
 		return
 	var e = entities[0]
+	# Put cancellation on the first action page and bind stable jobs, never indices.
+	if entities.size() == 1 and e.kind == "building":
+		if not e.complete:
+			actions.add_child(button("Cancel site · 75% refund",func(): sim.cancel_building(e.id)))
+		for i in range(e.queue.size()):
+			var job_id = e.queue[i].id
+			var job_name = Catalog.get_def(e.queue[i].type).name
+			actions.add_child(button("Cancel %s #%d · refund" % [job_name,i+1],func():
+				if sim.cancel_job(e.id,job_id): sim.message = job_name+" cancelled · full refund."
+			))
 	actions.add_child(button("Info & stats",func(): show_guide(e.type)))
 	if entities.size() == 1 and e.kind == "building":
-		if not e.complete: actions.add_child(button("Cancel site · 75% refund",func(): sim.cancel_building(e.id)))
-		else:
+		if e.complete:
 			for type in e.get("trains",[]):
 				var d = Catalog.get_def(type)
 				actions.add_child(button("%s · %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): sim.enqueue(e.id,type),hotkey_config.actionKeys[e.trains.find(type)]))
-			for i in range(e.queue.size()): actions.add_child(button("Cancel #"+str(i+1),func(): sim.cancel_queue(e.id,i)))
 			if not e.level_job.is_empty(): actions.add_child(button("Cancel upgrade",func(): sim.cancel_level(e.id)))
 			elif e.level < 3:
 				var cost = sim.level_cost(e)
@@ -896,6 +904,23 @@ func test_call(args):
 			sim.spawn("foundry",0,Vector2(-9,34))
 			sim.spawn("relay",0,Vector2(-4,34))
 			sim.nav.rebuild(sim.entities)
+		"activity_setup":
+			for e in sim.own(0): e.orders.clear(); e.queue.clear()
+			var workers = sim.own(0).filter(func(e): return e.type == "worker")
+			var r = sim.deposits[0]; r.amount = 2000
+			workers[0].p = r.p+Vector2(r.radius+1,0)
+			workers[0].carry = 0
+			sim.issue([workers[0].id],{"type":"gather","target":r.id})
+			var h = sim.own(0).filter(func(e): return e.type == "hq")[0]
+			sim.players[0].alloy = 1000
+			sim.enqueue(h.id,"worker"); sim.enqueue(h.id,"worker")
+			var site = sim.spawn("relay",0,Vector2(-20,8),false)
+			workers[1].p = site.p+Vector2(site.radius+1,0)
+			sim.issue([workers[1].id],{"type":"build","target":site.id})
+			sim.nav.rebuild(sim.entities); sim.update_vision(); sim.tick(0.05)
+			selected = [workers[0].id]; mode = ""
+			view.focus = r.p+Vector2(4,5); view.zoom = 34
+		"activity_damage": sim.apply_damage(sim.entity(int(command.id)),float(command.get("damage",1)),1)
 		"patrol_setup":
 			sim.entities = sim.entities.filter(func(e): return e.kind == "building")
 			sim.spawn("worker",0,Vector2(0,20))
@@ -962,6 +987,8 @@ func publish_state():
 		return {"id":e.id,"screen":[point.x,point.y]}
 	)
 	state.draw_calls = Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+	state.activity = overlay.activity_snapshot
+	state.activity_effects = view.activity_effects.size()
 	state.render_objects = Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
 	state.nodes = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 	JavaScriptBridge.eval("window.frontierState="+JSON.stringify(state))

@@ -9,6 +9,7 @@ var explored: Array = []
 var events: Array = []
 var nav = Navigation.new()
 var next_id = 1
+var next_queue_id = 1
 var time = 0.0
 var result = ""
 var ai_enabled = true
@@ -64,7 +65,7 @@ func resource(type: String,p: Vector2,amount: int):
 
 func spawn(type: String,team: int,p: Vector2,complete: bool = true) -> Dictionary:
 	var e = Catalog.get_def(type).duplicate(true)
-	e.merge({"type":type,"id":next_id,"team":team,"p":p,"max_hp":e.hp,"hp":e.hp if complete else 1.0,"complete":complete,"progress":1.0 if complete else 0.0,"orders":[],"path":[],"path_clock":0.0,"revision":-1,"cooldown":0.0,"carry":0,"carry_type":"","resource":0,"queue":[],"rally":null,"angle":0.0,"moving":false,"work":0.0,"stalled":0.0,"builder":0,"level":1,"max_shield":e.get("shield",0),"shield":e.get("shield",0) if complete else 0.0,"shield_delay":0.0,"level_job":{}},true)
+	e.merge({"type":type,"id":next_id,"team":team,"p":p,"max_hp":e.hp,"hp":e.hp if complete else 1.0,"complete":complete,"progress":1.0 if complete else 0.0,"orders":[],"path":[],"path_clock":0.0,"revision":-1,"cooldown":0.0,"carry":0,"carry_type":"","resource":0,"queue":[],"rally":null,"angle":0.0,"moving":false,"working":false,"work":0.0,"stalled":0.0,"builder":0,"level":1,"max_shield":e.get("shield",0),"shield":e.get("shield",0) if complete else 0.0,"shield_delay":0.0,"level_job":{}},true)
 	next_id += 1
 	entities.append(e)
 	return e
@@ -146,6 +147,7 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 			var limit = nav.half-maxf(1,e.radius+0.1)
 			o.p = o.p.clamp(Vector2.ONE*-limit,Vector2.ONE*limit)
 		if not append or o.type == "stop":
+			e.working = false
 			e.orders.clear()
 			e.path.clear()
 			e.path_clock = 0
@@ -182,7 +184,8 @@ func enqueue(id: int,type: String,team: int = 0) -> bool:
 		feedback("Supply limit: construct a Relay.",team)
 		return false
 	pay(team,d.cost)
-	b.queue.append({"type":type,"elapsed":0.0,"blocked":""})
+	b.queue.append({"id":next_queue_id,"type":type,"elapsed":0.0,"blocked":""})
+	next_queue_id += 1
 	return true
 
 func cancel_queue(id: int,index: int,team: int = 0) -> bool:
@@ -197,6 +200,13 @@ func resource_shortage(cost: Array,team: int) -> String:
 	if players[team].alloy < cost[0]: missing.append("%d alloy" % ceili(cost[0]-players[team].alloy))
 	if players[team].energy < cost[1]: missing.append("%d energy" % ceili(cost[1]-players[team].energy))
 	return "Need "+" and ".join(missing)+" more"
+
+func cancel_job(id: int,job_id: int,team: int = 0) -> bool:
+	var b = entity(id)
+	if b.is_empty(): return false
+	for i in range(b.queue.size()):
+		if b.queue[i].get("id",-1) == job_id: return cancel_queue(id,i,team)
+	return false
 
 func tech_level(team: int) -> int:
 	var level = 1
@@ -339,6 +349,7 @@ func approach(e: Dictionary,target: Dictionary,margin: float = 1.4) -> Vector2:
 	return target.p+direction*(target.radius+margin)
 
 func finish(e: Dictionary):
+	e.working = false
 	if not e.orders.is_empty(): e.orders.pop_front()
 	reset_worker_route(e)
 	e.work = 0
@@ -426,9 +437,12 @@ func apply_damage(t: Dictionary,damage: float,team: int):
 	var absorbed = minf(t.shield,damage)
 	t.shield -= absorbed
 	t.hp -= damage-absorbed
+	if t.kind == "building" and time >= t.get("next_hit_effect",0):
+		events.append({"type":"impact","p":t.p,"team":t.team,"shield":absorbed > 0})
+		t.next_hit_effect = time+0.2
 	if t.hp <= 0:
 		players[team].kills += 1
-		events.append({"type":"death","p":t.p,"team":t.team})
+		events.append({"type":"death","p":t.p,"team":t.team,"building":t.kind == "building","heavy":t.type == "tank"})
 		if t.kind == "building": nav.rebuild(entities)
 
 func hit(e: Dictionary,t: Dictionary):
@@ -460,6 +474,7 @@ func update_worker(e: Dictionary,o: Dictionary,dt: float):
 		var builder = entity(t.builder)
 		if not builder.is_empty() and builder.id != e.id and not builder.orders.is_empty() and builder.orders[0].type == "build" and builder.orders[0].get("target",0) == t.id and builder.p.distance_to(t.p) <= t.radius+2.2: return
 		t.builder = e.id
+		e.working = true
 		t.progress = minf(1,t.progress+dt/t.time)
 		t.hp = minf(t.max_hp,t.hp+dt*t.max_hp/t.time)
 		if t.progress >= 1:
@@ -485,6 +500,8 @@ func update_worker(e: Dictionary,o: Dictionary,dt: float):
 			move(e,approach(e,t,0.8),dt,0.2)
 			return
 		reset_worker_route(e)
+		e.working = true
+		e.angle = atan2(t.p.x-e.p.x,t.p.y-e.p.y)
 		e.work += dt
 		if e.work >= 0.7:
 			e.work -= 0.7
@@ -605,10 +622,12 @@ func tick(dt: float):
 		if e.complete and e.shield_delay <= 0: e.shield = minf(e.max_shield,e.shield+4*dt)
 		e.moving = false
 		if e.kind == "building":
+			e.working = false
 			update_level(e,dt)
 			update_production(e,dt)
 			if e.complete and e.has("damage"): fight(e,enemy(e,e.range),dt,false)
 			continue
+		e.working = false
 		if e.get("support",0) > 0:
 			if e.orders.is_empty(): assist(e,support_target(e),dt)
 			else:
