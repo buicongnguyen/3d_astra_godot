@@ -1,6 +1,7 @@
 extends Node3D
 const Catalog = preload("res://scripts/catalog.gd")
 const Activity = preload("res://scripts/activity.gd")
+const CombatFeedback = preload("res://scripts/combat_feedback.gd")
 var sim
 var camera: Camera3D
 var focus = Vector2(-20,20)
@@ -144,6 +145,7 @@ func build_map():
 	resource_objects.clear()
 	for effect in effects: effect.node.queue_free()
 	effects.clear()
+	activity_effects.clear()
 	terrain = Node3D.new()
 	add_child(terrain)
 	box(terrain,Vector3(0,-1,0),Vector3(sim.nav.half*2+2,1,sim.nav.half*2+2),Color("333d36"))
@@ -417,10 +419,14 @@ func refresh(dt: float):
 		if not sim.seen(event.p): continue
 		if event.type in ["impact","death"]:
 			var effect = event.duplicate()
-			effect.max_life = 0.3 if event.type == "impact" else 0.65
+			effect.max_life = CombatFeedback.duration(event)
 			effect.life = effect.max_life
 			activity_effects.append(effect)
-			if activity_effects.size() > 32: activity_effects.pop_front()
+			if activity_effects.size() > 32:
+				var discard = 0
+				for i in range(activity_effects.size()):
+					if activity_effects[i].type == "impact": discard = i; break
+				activity_effects.remove_at(discard) # Keep destruction smoke during hit spam.
 		if event.type in ["shot","support"]:
 			var a = Vector3(event.p.x,1.2,event.p.y)
 			var b = Vector3(event.to.x,1.2,event.to.y)

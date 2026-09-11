@@ -1,7 +1,9 @@
 extends Control
 const Activity = preload("res://scripts/activity.gd")
+const CombatFeedback = preload("res://scripts/combat_feedback.gd")
+var combat = CombatFeedback.new()
 var game
-var activity_snapshot = {"buildings":[],"resources":[],"workers":[]}
+var activity_snapshot = {"buildings":[],"resources":[],"workers":[],"burning":[],"combat":[]}
 
 func _draw():
 	if not game or not game.view: return
@@ -76,7 +78,11 @@ func draw_activity():
 	var sim = game.sim
 	var view = game.view
 	var targets = {}
-	activity_snapshot = {"buildings":[],"resources":[],"workers":[]}
+	activity_snapshot = {"buildings":[],"resources":[],"workers":[],"burning":[],"combat":[]}
+	combat.canvas = self; combat.game = game; combat.motion = view.water_motion; combat.eco = game.settings.eco
+	for e in sim.entities:
+		if activity_snapshot.burning.size() >= (8 if game.settings.eco else 16): break
+		if CombatFeedback.burning(e) and (e.team == 0 or sim.seen(e.p)) and combat.burn(e,sim.time): activity_snapshot.burning.append(e.id)
 	for e in sim.entities:
 		if e.hp <= 0 or e.team != 0: continue
 		var a = Activity.building(sim,e)
@@ -113,14 +119,4 @@ func draw_activity():
 		activity_snapshot.resources.append(r.id)
 	for e in view.activity_effects:
 		if not sim.seen(e.p): continue
-		var p = project(e.p,3 if e.type == "impact" else 1)
-		var fade = e.life/e.max_life
-		var radius = (12 if e.type == "impact" else (28 if e.get("building",false) else (22 if e.get("heavy",false) else 13)))*(2-fade if view.water_motion else 1)
-		if not feedback_visible(Rect2(p-Vector2.ONE*radius,Vector2.ONE*radius*2)): continue
-		var color = Color("9beaff") if e.get("shield",false) else Color("ffd199")
-		color.a = fade
-		draw_arc(p,radius,0,TAU,24,color,3 if e.type == "impact" else 2,true)
-		if view.water_motion:
-			for i in range(6):
-				var direction = Vector2.from_angle(i*TAU/6)
-				draw_line(p+direction*radius*0.55,p+direction*radius,color,2)
+		if combat.effect(e): activity_snapshot.combat.append({"type":e.type,"life":e.life,"shield":e.get("shield",false),"heavy":e.get("heavy",false)})

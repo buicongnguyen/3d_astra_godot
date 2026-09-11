@@ -156,7 +156,8 @@ func load_settings():
 
 func apply_settings():
 	view.set_colors(Color(HEXES[settings.player]),Color(HEXES[settings.enemy]))
-	view.water_motion = settings.water
+	var reduced_motion = bool(JavaScriptBridge.eval("matchMedia('(prefers-reduced-motion: reduce)').matches")) if OS.has_feature("web") else false
+	view.water_motion = settings.water and not reduced_motion
 	view.decorative.visible = settings.detail
 	for child in view.get_children():
 		if child is DirectionalLight3D: child.shadow_enabled = not settings.eco
@@ -594,6 +595,7 @@ Attack: %s per hit" % [d.hp,d.shield,str(d.get("damage",0))]
 	else: text += " (cannot attack)"
 	text += "
 Shields absorb damage before HP, then recharge at 4/s after 5 seconds without damage."
+	if d.kind == "building" or d.get("mechanical",false): text += "\nBelow 35% HP, completed buildings and vehicles show fire and smoke. Repairs clear it. This is a damage warning, not extra damage over time."
 	text += "
 Cost: %d alloy / %d energy · Time: %ds" % [d.cost[0],d.cost[1],d.time]
 	if type == "worker":
@@ -1092,6 +1094,24 @@ func test_call(args):
 			selected = [workers[0].id]; mode = ""
 			view.focus = r.p+Vector2(4,5); view.zoom = 34
 		"activity_damage": sim.apply_damage(sim.entity(int(command.id)),float(command.get("damage",1)),1)
+		"activity_repair":
+			var target = sim.entity(int(command.id))
+			target.hp = target.max_hp
+		"combat_setup":
+			for e in sim.entities: e.orders.clear()
+			var structure = sim.own(0).filter(func(e): return e.type == "barracks")[0]
+			structure.hp = structure.max_hp*0.2; structure.shield = 0
+			var tank = sim.spawn("tank",0,structure.p+Vector2(5,4))
+			tank.hp = tank.max_hp*0.2; tank.shield = 0
+			var hidden = sim.own(1).filter(func(e): return e.type == "barracks")[0]
+			hidden.hp = hidden.max_hp*0.2
+			sim.events.append({"type":"death","p":hidden.p,"team":1,"building":true})
+			sim.update_vision(); selected = [structure.id]
+			view.focus = structure.p+Vector2(2,5); view.zoom = 44
+		"combat_burst":
+			var target = sim.entity(int(command.id))
+			for i in range(100): sim.events.append({"type":"death","p":target.p,"team":0,"heavy":true,"seed":i})
+			sim.events.append({"type":"impact","p":target.p,"team":0})
 		"patrol_setup":
 			sim.entities = sim.entities.filter(func(e): return e.kind == "building")
 			sim.spawn("worker",0,Vector2(0,20))
@@ -1167,6 +1187,7 @@ func publish_state():
 	state.draw_calls = Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
 	state.activity = overlay.activity_snapshot
 	state.activity_effects = view.activity_effects.size()
+	state.activity_effect_lives = view.activity_effects.map(func(e): return e.life)
 	state.render_objects = Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
 	state.nodes = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 	JavaScriptBridge.eval("window.frontierState="+JSON.stringify(state))

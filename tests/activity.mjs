@@ -52,6 +52,30 @@ try{
       assert.equal((await state()).alloy,paid+75);
       await cmd({action:'step',seconds:.1});
       await page.waitForFunction(id=>!window.frontierState.activity.buildings.some(e=>e.id===id),site.id);
+      if(viewport.width===1280||viewport.width===390){
+        await cmd({action:'combat_setup'});s=await state();
+        const structure=s.entities.find(e=>e.team===0&&e.type==='barracks'),tank=s.entities.filter(e=>e.team===0&&e.type==='tank').at(-1);
+        assert.ok(s.activity.burning.includes(structure.id)&&s.activity.burning.includes(tank.id),'critical buildings and vehicles show fire');
+        assert.ok(s.activity.burning.every(id=>s.entities.find(e=>e.id===id).team===0),'hidden enemy fire stays behind fog');
+        assert.equal(s.activity_effects,0,'unseen enemy destruction stays behind fog');
+        assert.ok(s.activity.burning.length<=(mobile?8:16));
+        await page.screenshot({path:`test-results/combat-burning-${viewport.width}.png`});
+        await cmd({action:'activity_repair',id:structure.id});
+        assert.ok(!(await state()).activity.burning.includes(structure.id),'repair clears fire immediately');
+        await cmd({action:'activity_damage',id:tank.id,damage:10000});
+        assert.ok((await state()).activity.combat.some(e=>e.type==='death'&&e.heavy),'vehicle destruction feedback');
+        await page.screenshot({path:`test-results/combat-destruction-${viewport.width}.png`});
+        const nodes=(await state()).nodes;
+        await cmd({action:'combat_burst',id:structure.id});assert.equal((await state()).activity_effects,32,'burst effects are capped');
+        assert.ok((await state()).nodes<=nodes,'combat bursts create no extra scene nodes');
+        assert.ok((await state()).activity.combat.every(e=>e.type==='death'),'hit spam preserves destruction feedback');
+        await click('Pause');assert.equal((await state()).paused,true);
+        const frozen=(await state()).activity_effect_lives;
+        await page.waitForTimeout(150);assert.deepEqual((await state()).activity_effect_lives,frozen,'pause freezes feedback');
+        await click('Resume');
+        await cmd({action:'restart'});assert.equal((await state()).activity_effects,0,'restart clears all transient effects');
+        await cmd({action:'start',manual_clock:true});
+      }
       assert.deepEqual(errors,[]);console.log(`Activity bars, cancellation and resource feedback passed ${viewport.width}x${viewport.height}`);
     }
     await page.close();

@@ -432,17 +432,17 @@ func enemy(e: Dictionary,radius: float,clear_shot: bool = false) -> Dictionary:
 
 func apply_damage(t: Dictionary,damage: float,team: int):
 	if t.hp <= 0: return
-	if damage <= 0: return
+	if not is_finite(damage) or damage <= 0: return
 	t.shield_delay = 5.0
 	var absorbed = minf(t.shield,damage)
 	t.shield -= absorbed
 	t.hp -= damage-absorbed
-	if t.kind == "building" and time >= t.get("next_hit_effect",0):
-		events.append({"type":"impact","p":t.p,"team":t.team,"shield":absorbed > 0})
+	if t.hp > 0 and time >= t.get("next_hit_effect",0):
+		events.append({"type":"impact","p":t.p,"team":t.team,"shield":absorbed > 0,"building":t.kind == "building","seed":t.id})
 		t.next_hit_effect = time+0.2
 	if t.hp <= 0:
 		players[team].kills += 1
-		events.append({"type":"death","p":t.p,"team":t.team,"building":t.kind == "building","heavy":t.type == "tank"})
+		events.append({"type":"death","p":t.p,"team":t.team,"building":t.kind == "building","heavy":t.get("mechanical",false),"seed":t.id})
 		if t.kind == "building": nav.rebuild(entities)
 
 func hit(e: Dictionary,t: Dictionary):

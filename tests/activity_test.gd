@@ -1,6 +1,7 @@
 extends SceneTree
 const Simulation = preload("res://scripts/simulation.gd")
 const Activity = preload("res://scripts/activity.gd")
+const CombatFeedback = preload("res://scripts/combat_feedback.gd")
 var failures = 0
 var checks = 0
 func check(value: bool,text: String):
@@ -54,4 +55,24 @@ func _init():
 	check(s.events.filter(func(e): return e.type == "impact").size() == 1,"Impact throttle")
 	var tank = s.spawn("tank",0,Vector2(0,20));s.apply_damage(tank,10000,1)
 	check(s.events.filter(func(e): return e.type == "death")[0].heavy,"Tank death classified")
+	var vehicle = s.spawn("breaker",0,Vector2(4,20))
+	s.events.clear();s.apply_damage(vehicle,1,1)
+	check(s.events[0].type == "impact" and s.events[0].shield,"Vehicle shield impact")
+	for i in range(20): s.apply_damage(vehicle,1,1)
+	check(s.events.size() == 1,"Unit impact throttle")
+	vehicle.hp = vehicle.max_hp*0.2
+	check(CombatFeedback.burning(vehicle),"Critical vehicle burns")
+	vehicle.hp = vehicle.max_hp
+	check(not CombatFeedback.burning(vehicle),"Repair clears burning")
+	var infantry = s.spawn("ranger",0,Vector2(8,20)); infantry.hp = 1
+	check(not CombatFeedback.burning(infantry),"Infantry do not catch fire")
+	var site = s.spawn("relay",0,Vector2(12,20),false); site.hp = 1
+	check(not CombatFeedback.burning(site),"Construction is not damage")
+	site.complete = true
+	check(CombatFeedback.burning(site),"Critical building burns")
+	site.hp = 0; check(not CombatFeedback.burning(site),"Dead buildings stop ongoing fire")
+	s.apply_damage(vehicle,10000,1)
+	var death = s.events.filter(func(e): return e.type == "death")[0]
+	check(death.heavy and CombatFeedback.duration(death) == 2.2,"Breaker destruction smoke")
+	check(CombatFeedback.duration({"type":"death"}) == 0.75,"Short infantry destruction")
 	print("Activity: %d checks, %d failures" % [checks,failures]);quit(1 if failures else 0)
