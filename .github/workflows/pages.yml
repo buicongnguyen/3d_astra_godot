@@ -13,8 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: '22'
           cache: npm
@@ -58,6 +58,7 @@ jobs:
           MOBILE_DPR=1 npm run test:stages
           npm run test:harvesters
           npm run test:hotkeys
+          npm run test:pc-controls
       - name: Verify Patrol and Harvester Attack controls
         # The dedicated mobile-density check above still exercises DPR 3.
         # Render functional viewport checks at DPR 1 on the software renderer.
@@ -66,7 +67,7 @@ jobs:
         run: MOBILE_DPR=1 npm run test:activity
       - name: Verify compact stats and full production queues
         run: MOBILE_DPR=1 npm run test:status-layout
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         if: always()
         with:
           name: godot-verification
@@ -74,12 +75,12 @@ jobs:
             test-results/
             .tools/*.log
           retention-days: 7
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7.0.1
         with:
           name: FrontierCommand-Windows
           path: build/windows/
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6.0.0
+      - uses: actions/upload-pages-artifact@v5.0.0
         with:
           path: build/web
   deploy:
@@ -92,5 +93,5 @@ jobs:
       name: github-pages
       url: ${{ steps.pages.outputs.page_url }}
     steps:
-      - uses: actions/deploy-pages@v4
+      - uses: actions/deploy-pages@v5.0.1
         id: pages

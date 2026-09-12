@@ -25,6 +25,8 @@ var pointer_start = Vector2.ZERO
 var pointer_now = Vector2.ZERO
 var pointer_down = false
 var dragging = false
+var pointer_same_type = false
+var pointer_double_click = false
 var middle_down = false
 var touch_active = false
 var touches: Dictionary = {}
@@ -101,7 +103,7 @@ func _input(event):
 func is_world_point(point: Vector2) -> bool:
 	if is_instance_valid(objectives_button) and objectives_button.visible and objectives_button.get_global_rect().has_point(point): return false
 	if is_instance_valid(objectives_popup) and objectives_popup.visible and objectives_popup.get_global_rect().has_point(point): return false
-	return is_instance_valid(header) and is_instance_valid(bottom) and not header.get_global_rect().has_point(point) and not bottom.get_global_rect().has_point(point)
+	return get_viewport().get_visible_rect().has_point(point) and is_instance_valid(header) and is_instance_valid(bottom) and not header.get_global_rect().has_point(point) and not bottom.get_global_rect().has_point(point)
 
 func _notification(what):
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT and started and not paused: toggle_pause()
@@ -675,54 +677,77 @@ func close_guide():
 	scrim.visible = paused
 
 func context_order(screen: Vector2,attack: bool = false):
-	var target = view.pick(screen)
-	var p = view.ground(screen)
+	var on_minimap = minimap_rect.has_point(screen)
+	var target = {} if on_minimap else view.pick(screen)
+	var p = map_position(screen) if on_minimap else view.ground(screen)
 	var ids = selected.filter(func(id): return not sim.entity(id).is_empty() and sim.entity(id).kind == "unit")
-	if ids.is_empty():
-		mode = ""
+	var append = queue_orders or Input.is_key_pressed(KEY_SHIFT)
+	if mode == "rally" or (ids.is_empty() and mode == ""):
 		for id in selected:
 			var b = sim.entity(id)
 			if b.get("kind","") == "building" and b.complete and not b.get("trains",[]).is_empty():
 				b.rally = p.clamp(Vector2.ONE*(-sim.nav.half+3),Vector2.ONE*(sim.nav.half-3))
 				sim.message = "Rally point set. New units will move here."
-		return
-	if mode == "rally":
-		for id in selected:
-			var b = sim.entity(id)
-			if b.get("kind","") == "building" and b.complete and not b.get("trains",[]).is_empty(): b.rally = p
 		mode = ""; return
 	if mode == "target_attack":
 		if target.is_empty() or target.get("team",-1) <= 0 or not sim.seen(target.p,0):
 			sim.message = "Attack: choose a visible enemy unit or building."
 			return
-		sim.issue(ids.filter(func(id): return sim.entity(id).get("damage",0) > 0),{"type":"attack","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
+		sim.issue(ids.filter(func(id): return sim.entity(id).get("damage",0) > 0),{"type":"attack","target":target.id},append)
 		acknowledge()
 		mode = ""
 		return
 	var order = {"type":"patrol" if mode == "patrol" else ("attackmove" if attack else "move"),"p":p}
 	if mode == "support":
-		var helpers = ids.filter(func(id): return sim.entity(id).get("support",0) > 0)
-		if target.is_empty() or not helpers.any(func(id): return sim.support_valid(sim.entity(id),target)):
+		var helpers = ids.filter(func(id): return not target.is_empty() and sim.support_valid(sim.entity(id),target))
+		if helpers.is_empty():
 			sim.message = "Medic: select allied infantry. Engineer: select a completed building or vehicle."
 			return
-		sim.issue(helpers,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
+		sim.issue(helpers,{"type":"support","target":target.id},append)
 		mode = ""
 		return
 	if not target.is_empty() and not mode in ["move","attack","patrol"]:
 		if target.get("team",-1) == 0:
-			sim.issue(ids,{"type":"support","target":target.id},queue_orders or Input.is_key_pressed(KEY_SHIFT))
-			ids = ids.filter(func(id): return sim.entity(id).get("support",0) <= 0)
-		if target.kind == "resource": order = {"type":"gather","target":target.id}
-		elif target.team == 1: order = {"type":"attack","target":target.id}
-		elif not target.complete: order = {"type":"build","target":target.id}
-		elif target.type == "hq": order = {"type":"deliver","target":target.id}
-	sim.issue(ids,order,queue_orders or Input.is_key_pressed(KEY_SHIFT))
+			var helpers = ids.filter(func(id): return sim.support_valid(sim.entity(id),target))
+			sim.issue(helpers,{"type":"support","target":target.id},append)
+			ids = ids.filter(func(id): return not helpers.has(id))
+		if target.kind == "resource" or (target.get("team",-1) == 0 and (not target.complete or target.type == "hq")):
+			var workers = ids.filter(func(id): return sim.entity(id).type == "worker")
+			var job = "gather" if target.kind == "resource" else ("build" if not target.complete else "deliver")
+			sim.issue(workers,{"type":job,"target":target.id},append)
+			ids = ids.filter(func(id): return not workers.has(id))
+		elif target.get("team",-1) > 0: order = {"type":"attack","target":target.id}
+	if attack and target.get("team",-1) > 0: order = {"type":"attack","target":target.id}
+	if order.type == "attack":
+		var fighters = ids.filter(func(id): return sim.entity(id).get("damage",0) > 0)
+		sim.issue(fighters,order,append)
+		sim.issue(ids.filter(func(id): return not fighters.has(id)),{"type":"move","p":p},append)
+	else: sim.issue(ids,order,append)
 	acknowledge()
 	mode = ""
 
-func click_world(point: Vector2,touch: bool = false):
+func map_position(point: Vector2) -> Vector2:
+	return (point-minimap_rect.position)/minimap_rect.size*(sim.nav.half*2)-Vector2.ONE*sim.nav.half
+
+func unit_on_screen(e: Dictionary) -> bool:
+	var p = view.camera.unproject_position(Vector3(e.p.x,1,e.p.y))
+	return is_world_point(p) and not minimap_rect.has_point(p)
+
+func select_screen_type(target: Dictionary,undo_first_toggle: bool = false):
+	var same = sim.own(0).filter(func(e): return e.type == target.type and unit_on_screen(e))
+	var additive = Input.is_key_pressed(KEY_SHIFT)
+	var remove = additive and selected.has(target.id)
+	# The first Shift-click already toggled the clicked unit before a double-click.
+	if additive and undo_first_toggle: remove = not remove
+	if not additive: selected.clear()
+	for e in same:
+		if remove: selected.erase(e.id)
+		elif not selected.has(e.id): selected.append(e.id)
+
+func click_world(point: Vector2,touch: bool = false,same_type: bool = false,double_click: bool = false):
 	if minimap_rect.has_point(point):
-		view.focus = (point-minimap_rect.position)/minimap_rect.size*(sim.nav.half*2)-Vector2.ONE*sim.nav.half
+		if mode != "" and mode != "build": context_order(point,mode == "attack")
+		else: view.focus = map_position(point)
 		return
 	if mode == "build":
 		placement_point = view.ground(point)
@@ -735,12 +760,13 @@ func click_world(point: Vector2,touch: bool = false):
 		return
 	var target = view.pick(point)
 	if not target.is_empty() and target.get("team",-1) == 0:
-		if Input.is_key_pressed(KEY_SHIFT):
+		if same_type and target.kind == "unit": select_screen_type(target,double_click)
+		elif Input.is_key_pressed(KEY_SHIFT):
 			if selected.has(target.id): selected.erase(target.id)
 			else: selected.append(target.id)
 		else: selected = [target.id]
 	elif touch and not selected.is_empty(): context_order(point)
-	else: selected.clear()
+	elif not Input.is_key_pressed(KEY_SHIFT): selected.clear()
 	action_signature = ""
 
 func begin_build(type: String):
@@ -787,23 +813,27 @@ func _unhandled_input(event):
 		if event.button_index == MOUSE_BUTTON_WHEEL_DOWN: view.zoom += 3
 		if event.button_index == MOUSE_BUTTON_MIDDLE: middle_down = event.pressed
 		if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
-			if minimap_rect.has_point(event.position):
-				var p = (event.position-minimap_rect.position)/minimap_rect.size*(sim.nav.half*2)-Vector2.ONE*sim.nav.half
-				sim.issue(selected,{"type":"move","p":p},event.shift_pressed)
+			pointer_down = false; dragging = false
+			if mode != "":
+				mode = ""; placement_ready = false; view.ghost.visible = false; build_feedback = ""
 			else: context_order(event.position)
 		if event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
+				pointer_same_type = event.double_click or event.ctrl_pressed
+				pointer_double_click = event.double_click and not event.ctrl_pressed
 				pointer_down = true
 				pointer_start = event.position
 				pointer_now = event.position
 				dragging = false
 			elif pointer_down:
-				if dragging and mode == "":
+				if minimap_rect.has_point(pointer_start):
+					if minimap_rect.has_point(event.position): click_world(event.position)
+				elif dragging and mode == "":
 					var rect = Rect2(pointer_start,event.position-pointer_start).abs()
 					if not event.shift_pressed: selected.clear()
 					for e in sim.own(0):
-						if e.kind == "unit" and rect.has_point(view.camera.unproject_position(Vector3(e.p.x,1,e.p.y))) and not selected.has(e.id): selected.append(e.id)
-				else: click_world(event.position)
+						if e.kind == "unit" and unit_on_screen(e) and rect.has_point(view.camera.unproject_position(Vector3(e.p.x,1,e.p.y))) and not selected.has(e.id): selected.append(e.id)
+				else: click_world(event.position,false,pointer_same_type,pointer_double_click)
 				pointer_down = false
 				dragging = false
 	if event is InputEventMouseMotion:
@@ -1123,6 +1153,17 @@ func test_call(args):
 			sim.nav.rebuild(sim.entities); sim.update_vision()
 			view.focus = Vector2(0,24); view.zoom = 42
 			selected.clear(); mode = ""
+		"pc_setup":
+			sim.entities = sim.entities.filter(func(e): return e.kind == "building")
+			for item in [["worker",-8,20],["ranger",-3,20],["ranger",1,20],["tank",5,20],["medic",-3,26],["engineer",1,26],["ranger",-48,-48]]:
+				sim.spawn(item[0],0,Vector2(item[1],item[2]))
+			sim.spawn("worker",1,Vector2(5,26))
+			sim.deposits[0].p = Vector2(-8,26)
+			sim.spawn("relay",0,Vector2(-10,14),false)
+			sim.players[0].alloy = 1000; sim.players[0].energy = 1000
+			sim.nav.rebuild(sim.entities); sim.update_vision()
+			view.focus = Vector2(0,24); view.zoom = 44
+			selected.clear(); mode = ""
 		"support_setup":
 			var healer = sim.own(0).filter(func(e): return e.type == "medic")[0]
 			var ally = sim.own(0).filter(func(e): return e.type == "ranger")[0]
@@ -1178,6 +1219,8 @@ func publish_state():
 	state.action_rect = [action_scroll.global_position.x,action_scroll.global_position.y,action_scroll.size.x,action_scroll.size.y]
 	state.ui_action_serial = ui_action_serial
 	state.minimap_rect = [minimap_rect.position.x,minimap_rect.position.y,minimap_rect.size.x,minimap_rect.size.y]
+	var ground_probe = view.camera.unproject_position(Vector3(0,0,32))
+	state.ground_probe = [ground_probe.x,ground_probe.y]
 	state.map_id = sim.map_id
 	state.map_size = sim.nav.half*2
 	state.building_probes = sim.own(0).filter(func(e): return e.kind == "building").map(func(e):
@@ -1352,7 +1395,7 @@ func show_shortcuts():
 	var scroll = ScrollContainer.new(); scroll.position = Vector2(16,16); guide_panel.add_child(scroll)
 	var body = VBoxContainer.new(); body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; scroll.add_child(body)
 	body.add_child(label("PC COMMANDS & SELECTION",20))
-	var instructions = label("Q E R T Y: displayed action tiles\nB: construction / WASD: camera / Esc: cancel\nCtrl+1-9: save / Shift+1-9: add / 1-9: recall\nPress a group number twice to focus. Hold Shift to queue orders.",13)
+	var instructions = label("Left-click / drag: select. Shift: add or remove.\nCtrl-click / double-click: same unit type on screen.\nRight-click: move, attack or worker job; cancel pending targeting.\nMinimap: click to pan; right-click to move or set a production rally.\nF + click: attack-move ground or attack enemy. X: stop.\nQ E R T Y: action tiles / B: build / WASD: camera / Esc: cancel\nCtrl+1-9: save / Shift+1-9: add / 1-9: recall; twice to focus.\nHold Shift to queue orders, including on the minimap.",13)
 	instructions.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; body.add_child(instructions)
 	for item in hotkey_config.commands:
 		body.add_child(button(item.label+" ["+item.key+"]",func(): close_guide(); run_shortcut(item.id)))
