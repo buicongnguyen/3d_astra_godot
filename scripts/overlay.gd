@@ -1,9 +1,16 @@
 extends Control
 const Activity = preload("res://scripts/activity.gd")
 const CombatFeedback = preload("res://scripts/combat_feedback.gd")
-var combat = CombatFeedback.new()
+var combat_layer
 var game
 var activity_snapshot = {"buildings":[],"resources":[],"workers":[],"burning":[],"combat":[]}
+
+func _ready():
+	combat_layer = load("res://scripts/combat_layer.gd").new()
+	combat_layer.game = game
+	combat_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	combat_layer.show_behind_parent = true
+	add_child(combat_layer)
 
 func _draw():
 	if not game or not game.view: return
@@ -79,10 +86,9 @@ func draw_activity():
 	var view = game.view
 	var targets = {}
 	activity_snapshot = {"buildings":[],"resources":[],"workers":[],"burning":[],"combat":[]}
-	combat.canvas = self; combat.game = game; combat.motion = view.water_motion; combat.eco = game.settings.eco
-	for e in sim.entities:
-		if activity_snapshot.burning.size() >= (8 if game.settings.eco else 16): break
-		if CombatFeedback.burning(e) and (e.team == 0 or sim.seen(e.p)) and combat.burn(e,sim.time): activity_snapshot.burning.append(e.id)
+	activity_snapshot.burning = combat_layer.snapshot.burning
+	activity_snapshot.combat = combat_layer.snapshot.combat
+	activity_snapshot.shots = combat_layer.snapshot.shots
 	for e in sim.entities:
 		if e.hp <= 0 or e.team != 0: continue
 		var a = Activity.building(sim,e)
@@ -117,6 +123,3 @@ func draw_activity():
 		for point in points: bounds = bounds.expand(point)
 		if feedback_visible(bounds.grow(2)): draw_polyline(points,Color("ffcf75") if r.type == "alloy" else Color("8ce7ff"),2.5,true)
 		activity_snapshot.resources.append(r.id)
-	for e in view.activity_effects:
-		if not sim.seen(e.p): continue
-		if combat.effect(e): activity_snapshot.combat.append({"type":e.type,"life":e.life,"shield":e.get("shield",false),"heavy":e.get("heavy",false)})

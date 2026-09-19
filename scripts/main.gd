@@ -61,7 +61,7 @@ var modal_desc: Label
 var modal_actions: VBoxContainer
 var scenario: OptionButton
 var action_signature = ""
-var settings = {"player":0,"enemy":1,"eco":false,"water":true,"detail":true,"muted":false}
+var settings = {"player":0,"enemy":1,"eco":false,"water":true,"combat":true,"detail":true,"muted":false}
 var test_callback
 var test_enabled = false
 var beep: AudioStreamPlayer
@@ -77,6 +77,7 @@ var action_pager: HBoxContainer
 var action_page = 0
 var action_context = ""
 var test_manual_clock = false
+var test_visual_freeze = false
 var action_pages = 1
 var mobile_layout = false
 var touch_device = false
@@ -160,6 +161,7 @@ func apply_settings():
 	view.set_colors(Color(HEXES[settings.player]),Color(HEXES[settings.enemy]))
 	var reduced_motion = bool(JavaScriptBridge.eval("matchMedia('(prefers-reduced-motion: reduce)').matches")) if OS.has_feature("web") else false
 	view.water_motion = settings.water and not reduced_motion
+	view.combat_motion = settings.combat and not reduced_motion
 	view.decorative.visible = settings.detail
 	for child in view.get_children():
 		if child is DirectionalLight3D: child.shadow_enabled = not settings.eco
@@ -485,6 +487,7 @@ func start_match():
 func reset_sim(river: bool, stage_id: String = ""):
 	if is_instance_valid(objectives_popup): objectives_popup.hide()
 	test_manual_clock = false
+	test_visual_freeze = false
 	sim = Simulation.new(true,river,stage_id)
 	view.sim = sim
 	view.build_map()
@@ -551,9 +554,9 @@ func show_settings():
 		picks.append(pick)
 	body.add_child(button("High contrast: Gold / Violet",func(): picks[0].selected = 3; picks[1].selected = 4))
 	var toggles = {}
-	for key in ["eco","water","detail","muted"]:
+	for key in ["eco","water","combat","detail","muted"]:
 		var toggle = CheckButton.new()
-		toggle.text = {"eco":"Eco graphics (disable shadows)","water":"Animate water","detail":"Show decorative vegetation","muted":"Mute command sounds"}[key]
+		toggle.text = {"eco":"Eco graphics (disable shadows)","water":"Animate water","combat":"Animate combat effects","detail":"Show decorative scenery","muted":"Mute command sounds"}[key]
 		toggle.button_pressed = settings[key]
 		toggle.custom_minimum_size.y = 44
 		body.add_child(toggle)
@@ -1056,7 +1059,7 @@ func _process(dt):
 		var pan = Vector2(float(Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT))-float(Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)),float(Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN))-float(Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)))
 		if not Input.is_key_pressed(KEY_CTRL) and not Input.is_key_pressed(KEY_ALT) and not Input.is_key_pressed(KEY_META): view.focus += pan*view.zoom*0.65*dt
 	view.selected = selected
-	view.refresh(dt if not paused else 0.0)
+	view.refresh(dt if not paused and not (test_enabled and test_visual_freeze) else 0.0)
 	view.ghost.visible = mode == "build" and not paused
 	if view.ghost.visible:
 		view.ghost.position = Vector3(placement_point.x,0.18,placement_point.y)
@@ -1127,6 +1130,20 @@ func test_call(args):
 		"activity_repair":
 			var target = sim.entity(int(command.id))
 			target.hp = target.max_hp
+		"visual_setup":
+			test_visual_freeze = true
+			sim.entities = sim.entities.filter(func(e): return e.kind == "building")
+			for i in range(8): sim.spawn(["ranger","tank","antitank","breaker"][i%4],i/4,Vector2(-8+(i%4)*5,16+(i/4)*12))
+			sim.nav.rebuild(sim.entities); sim.update_vision(); sim.visible[0].fill(1); sim.explored[0].fill(1)
+			view.focus = Vector2(0,22); view.zoom = 42; selected.clear()
+		"visual_shots":
+			var units = sim.entities.filter(func(e): return e.kind == "unit")
+			for i in range(int(command.get("count",4))):
+				var a = units[i%4]; var b = units[i%4+4]
+				sim.events.append({"type":"shot","p":a.p,"to":b.p,"team":a.team,"source":a.id,"weapon":a.type})
+		"visual_advance": view.refresh(float(command.get("seconds",0)))
+		"visual_fog": sim.visible[0].fill(0 if command.get("hidden",false) else 1)
+		"visual_settings": settings.water = false; settings.combat = command.get("motion",true); apply_settings()
 		"combat_setup":
 			for e in sim.entities: e.orders.clear()
 			var structure = sim.own(0).filter(func(e): return e.type == "barracks")[0]
@@ -1231,6 +1248,7 @@ func publish_state():
 	state.activity = overlay.activity_snapshot
 	state.activity_effects = view.activity_effects.size()
 	state.activity_effect_lives = view.activity_effects.map(func(e): return e.life)
+	state.visual = {"shots":view.shot_effects.size(),"lives":view.shot_effects.map(func(e): return e.life),"combat_motion":view.combat_motion,"water_motion":view.water_motion,"theme":view.theme(),"barrels":view.objects.values().map(func(o): return o.barrels.size()).reduce(func(a,b): return a+b,0)}
 	state.render_objects = Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
 	state.nodes = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 	JavaScriptBridge.eval("window.frontierState="+JSON.stringify(state))

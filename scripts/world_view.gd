@@ -20,6 +20,12 @@ var fog_clock = 0.0
 var water_material: ShaderMaterial
 var decorative: Node3D
 var water_motion = true
+var combat_motion = true
+var shot_effects: Array = []
+var shot_free: Array = []
+var visual_style = JSON.parse_string(FileAccess.get_file_as_string("res://data/visual-style.json"))
+var world_environment: Environment
+var sunlight: DirectionalLight3D
 var selected: Array = []
 var ghost: MeshInstance3D
 var selection_box = Rect2()
@@ -46,10 +52,14 @@ func setup(simulation):
 				for track in range(animation.get_track_count()):
 					var target = animation_root.get_node_or_null(NodePath(str(animation.track_get_path(track)).get_slice(":",0)))
 					if target: animated.append(target)
+		var barrels: Array = []
+		collect_barrels(model,barrels)
+		for part in barrels: animated.append(part.node)
 		batch_static_parts(model,animated)
 		models[type] = model
 	var environment = WorldEnvironment.new()
 	var env = Environment.new()
+	world_environment = env
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color("14242c")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
@@ -59,6 +69,7 @@ func setup(simulation):
 	environment.environment = env
 	add_child(environment)
 	var light = DirectionalLight3D.new()
+	sunlight = light
 	light.rotation_degrees = Vector3(-52,-25,0)
 	light.light_color = Color("fff0d2")
 	light.light_energy = 0.78
@@ -127,14 +138,40 @@ func box(parent: Node3D,p: Vector3,size: Vector3,color: Color) -> MeshInstance3D
 	parent.add_child(node)
 	return node
 
+func theme() -> Dictionary:
+	return visual_style.themes.get(sim.map_id,visual_style.themes.classic)
+
+func weapon_style(e: Dictionary) -> Dictionary:
+	return visual_style.weapons.get("support" if e.type == "support" else e.get("weapon","rifle"),visual_style.weapons.rifle)
+
+func shot_visible(e: Dictionary) -> bool:
+	var steps = maxi(1,ceili(e.p.distance_to(e.to)))
+	for i in range(steps+1):
+		if not sim.seen(e.p.lerp(e.to,float(i)/steps)): return false
+	return true
+
+func collect_barrels(node: Node,parts: Array):
+	var name_lower = str(node.name).to_lower()
+	if node is MeshInstance3D and (name_lower.begins_with("main_cannon") or name_lower.begins_with("muzzle") or name_lower.begins_with("barrel") or name_lower.begins_with("cannon")):
+		parts.append({"node":node,"base":node.position})
+	for child in node.get_children(): collect_barrels(child,parts)
+
 func surface(p: Vector2) -> Color:
-	if sim.map_id == "classic": return Color("8b805e")
+	var palette = theme()
+	if sim.map_id == "classic": return Color(palette.dirt)
 	if sim.nav.river and absf(p.y) < 5: return Color("777258")
-	if minf(absf(p.x-22),absf(p.x+22)) < 2.3 or absf(p.y+p.x*0.35) < 1.8: return Color("af9973")
+	if minf(absf(p.x-22),absf(p.x+22)) < 2.3 or absf(p.y+p.x*0.35) < 1.8: return Color(palette.road)
 	var n = sin(p.x*0.13)*cos(p.y*0.17)+sin((p.x+p.y)*0.09)
-	return Color("b09e76") if n > 0.65 else (Color("887b5d") if n < -0.4 else Color("788566"))
+	var biome = Catalog.maps[sim.map_id].get("biome","")
+	if biome == "desert": return Color(palette.dirt if n < -0.8 else palette.sand)
+	if biome == "woodland": return Color(palette.dirt if n > 1.2 else palette.grass)
+	if biome == "highland": return Color(palette.stone if n > 0.4 else (palette.grass if n < -0.8 else palette.dirt))
+	return Color(palette.sand if n > 0.65 else (palette.dirt if n < -0.4 else palette.grass))
 
 func build_map():
+	world_environment.background_color = Color(theme().sky)
+	world_environment.ambient_light_color = Color(theme().ambient)
+	sunlight.light_color = Color(theme().sun)
 	if is_instance_valid(terrain):
 		remove_child(terrain)
 		terrain.queue_free()
@@ -146,6 +183,7 @@ func build_map():
 	for effect in effects: effect.node.queue_free()
 	effects.clear()
 	activity_effects.clear()
+	shot_free.append_array(shot_effects); shot_effects.clear()
 	terrain = Node3D.new()
 	add_child(terrain)
 	box(terrain,Vector3(0,-1,0),Vector3(sim.nav.half*2+2,1,sim.nav.half*2+2),Color("333d36"))
@@ -157,7 +195,9 @@ func build_map():
 			for corner in [Vector2(0,0),Vector2(0,2),Vector2(2,0),Vector2(2,0),Vector2(0,2),Vector2(2,2)]:
 				var p = Vector2(x,z)+corner
 				var height = -0.38 if sim.nav.river and absf(p.y) <= 3 else 0.0
-				st.set_color(surface(p))
+				var tint = surface(p)
+				var grain = sin(p.x*17.13+p.y*39.71)*0.018
+				st.set_color(tint.lightened(grain) if grain > 0 else tint.darkened(-grain))
 				st.set_normal(Vector3.UP)
 				st.add_vertex(Vector3(p.x,height,p.y))
 	var ground = MeshInstance3D.new()
@@ -198,6 +238,16 @@ func build_map():
 		box(terrain,Vector3(0,-0.035,0),Vector3(10,0.05,6),Color("78a7a0"))
 	decorative = Node3D.new()
 	terrain.add_child(decorative)
+	# Bounded landmarks sit entirely beyond the playable boundary.
+	var hill_mesh = SphereMesh.new(); hill_mesh.radial_segments = 7; hill_mesh.rings = 3
+	var hill_mat = material(Color(theme().rock))
+	var hills = MultiMeshInstance3D.new(); var batch = MultiMesh.new()
+	batch.transform_format = MultiMesh.TRANSFORM_3D; batch.mesh = hill_mesh; batch.instance_count = 16
+	for i in range(16):
+		var basis = Basis().scaled(Vector3(6+i%3,2.8 if sim.map_id == "dunes" else 5+i%2,8+i%3))
+		var p = Vector3((1 if i%2 else -1)*(sim.nav.half+7),0.4,-sim.nav.half+8+(i/2)*(sim.nav.half*2-16)/7.0)
+		batch.set_instance_transform(i,Transform3D(basis,p))
+	hills.multimesh = batch; hills.material_override = hill_mat; decorative.add_child(hills)
 	var env_scene = load("res://assets/models/environment.glb") as PackedScene
 	if env_scene:
 		var library = env_scene.instantiate()
@@ -208,7 +258,9 @@ func build_map():
 				var item = source.duplicate()
 				decorative.add_child(item)
 				var x = -43+(i*17)%86
-				var z = (-49 if i%2 == 0 else 49) if i < 12 else (-6 if i%2 == 0 else 6)
+				var z = (-sim.nav.half-4 if i%2 == 0 else sim.nav.half+4) if i < 12 else (-6 if i%2 == 0 else 6)
+				if not sim.nav.river and i >= 12: z = -sim.nav.half-3
+				if sim.map_id == "dunes" and i < 12: item.scale *= 0.45
 				item.position = Vector3(x,0,z)
 				item.rotation.y = i*2.4
 		library.free()
@@ -295,6 +347,11 @@ func create_entity(e: Dictionary):
 	ring.position.y = 0.12
 	ring.material_override = material(colors[e.team],true)
 	root.add_child(ring)
+	var edge = MeshInstance3D.new(); var edge_mesh = TorusMesh.new()
+	edge_mesh.inner_radius = e.radius+0.12; edge_mesh.outer_radius = e.radius+0.28
+	edge_mesh.rings = 24; edge_mesh.ring_segments = 6
+	edge.mesh = edge_mesh; edge.material_override = material(Color("13221f"),true)
+	edge.scale.y = 0.35; edge.position.y = -0.03; ring.add_child(edge)
 	if e.kind == "building":
 		var badge = Label3D.new()
 		badge.name = "LevelBadge"
@@ -311,6 +368,9 @@ func create_entity(e: Dictionary):
 	var boxes: Array = []
 	boxes = model.get_meta("pick_boxes",[])
 	objects[e.id] = {"root":root,"model":model,"ring":ring,"legs":legs,"animation":animation,"clip":"","pick_boxes":boxes}
+	var barrels: Array = []
+	collect_barrels(model,barrels)
+	objects[e.id].barrels = barrels; objects[e.id].recoil = 0.0
 
 func collect_pick_boxes(node: Node,model: Node3D,boxes: Array):
 	if node is MeshInstance3D and node.mesh:
@@ -383,6 +443,8 @@ func refresh(dt: float):
 		o.root.position = Vector3(e.p.x,0.12 if sim.nav.river and absf(e.p.y) < 4 else 0,e.p.y)
 		o.root.visible = e.team == 0 or sim.seen(e.p)
 		o.model.rotation.y = e.angle
+		o.recoil = maxf(0,o.recoil-dt)
+		for part in o.barrels: part.node.position = part.base-Vector3(0,0,sin(o.recoil/0.22*PI)*0.18 if combat_motion else 0.0)
 		o.model.rotation.z = sin(sim.time*7+e.id)*0.045 if Activity.harvesting(sim,e) and water_motion else 0.0
 		o.model.scale = Vector3.ONE*(0.25+0.75*e.progress)
 		o.ring.visible = selected.has(e.id)
@@ -427,13 +489,16 @@ func refresh(dt: float):
 				for i in range(activity_effects.size()):
 					if activity_effects[i].type == "impact": discard = i; break
 				activity_effects.remove_at(discard) # Keep destruction smoke during hit spam.
-		if event.type in ["shot","support"]:
-			var a = Vector3(event.p.x,1.2,event.p.y)
-			var b = Vector3(event.to.x,1.2,event.to.y)
-			var line = box(self,(a+b)*0.5,Vector3(0.075,0.075,a.distance_to(b)),Color("76f2c4") if event.type == "support" else colors[event.team])
-			if a.distance_to(b) > 0.001: line.look_at(b)
-			effects.append({"node":line,"life":0.12})
+		if event.type in ["shot","support"] and shot_visible(event):
+			var effect: Dictionary = shot_effects.pop_front() if shot_effects.size() >= 64 else (shot_free.pop_back() if not shot_free.is_empty() else {})
+			effect.clear(); effect.merge(event)
+			effect.max_life = weapon_style(event).life; effect.life = effect.max_life
+			shot_effects.append(effect)
+			if event.type == "shot" and objects.has(event.get("source",-1)) and weapon_style(event).kind == "cannon": objects[event.source].recoil = 0.22
 	sim.events.clear()
+	for i in range(shot_effects.size()-1,-1,-1):
+		shot_effects[i].life -= dt
+		if shot_effects[i].life <= 0: shot_free.append(shot_effects[i]); shot_effects.remove_at(i)
 	for effect in activity_effects: effect.life -= dt
 	activity_effects = activity_effects.filter(func(e): return e.life > 0)
 	for effect in effects.duplicate():

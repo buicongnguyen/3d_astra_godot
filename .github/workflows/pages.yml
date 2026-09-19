@@ -65,6 +65,8 @@ jobs:
         run: MOBILE_DPR=1 npm run test:patrol
       - name: Verify construction and harvesting feedback
         run: MOBILE_DPR=1 npm run test:activity
+      - name: Verify visual combat and biome palettes
+        run: npm run test:visual-combat
       - name: Verify compact stats and full production queues
         run: MOBILE_DPR=1 npm run test:status-layout
       - uses: actions/upload-artifact@v7.0.1

@@ -280,7 +280,7 @@ func assist(e: Dictionary,t: Dictionary,dt: float,chase: bool = false) -> bool:
 	elif t.hp < t.max_hp and e.cooldown <= 0:
 		t.hp = minf(t.max_hp,t.hp+e.support)
 		e.cooldown = e.interval
-		events.append({"type":"support","p":e.p,"to":t.p,"team":e.team})
+		events.append({"type":"support","p":e.p,"to":t.p,"team":e.team,"weapon":e.type})
 	return true
 
 func attack_value(e: Dictionary) -> float:
@@ -451,7 +451,7 @@ func hit(e: Dictionary,t: Dictionary):
 	if e.type == "breaker":
 		for other in entities:
 			if other.id != t.id and other.team != e.team and other.p.distance_to(t.p) < 3: apply_damage(other,damage*0.5,e.team)
-	events.append({"type":"shot","p":e.p,"to":t.p,"team":e.team})
+	events.append({"type":"shot","p":e.p,"to":t.p,"team":e.team,"weapon":e.type,"source":e.id})
 	e.cooldown = e.interval
 
 func fight(e: Dictionary,t: Dictionary,dt: float,chase: bool = true) -> bool:
