@@ -73,7 +73,7 @@ jobs:
           - name: mobile-density
             scripts: mobile-density
           - name: maps
-            scripts: stages harvesters
+            scripts: stages harvesters new-game
           - name: patrol
             scripts: patrol
           - name: activity

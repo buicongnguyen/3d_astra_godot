@@ -174,7 +174,7 @@ for(const mobile of [false,true]){
  await cmd({action:'camera',x:-20,z:18,zoom:48});
  await page.screenshot({path:`test-results/${mobile?'mobile':'desktop'}-game.png`});
  await cmd({action:'outcome',team:1});assert.equal((await state()).result,'victory');
- await press('New expedition');assert.equal((await state()).started,false);
+ await press('New game / choose map');assert.equal((await state()).started,false);
  // The UI callback acknowledges restart before the next render refresh recreates models.
  await page.waitForFunction(()=>window.frontierState.models===18);
  assert.equal((await state()).settings.player,3);

@@ -345,6 +345,7 @@ func make_ui():
 	modal_body.add_theme_constant_override("separation",14)
 	modal_scroll.add_child(modal_body)
 	modal_title = label("FRONTIER COMMAND",27)
+	modal_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	modal_body.add_child(modal_title)
 	modal_desc = label("",15)
 	modal_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -354,8 +355,12 @@ func make_ui():
 	scenario.add_item("Ashen Frontier · 96×96")
 	scenario.add_item("Copper Basin · 128×128")
 	scenario.add_item("Frontier Expanse · 160×160")
-	scenario.custom_minimum_size.y = 40
+	scenario.custom_minimum_size.y = 44
+	scenario.fit_to_longest_item = false
+	scenario.clip_text = true
+	scenario.tooltip_text = "Choose map / stage"
 	modal_body.add_child(scenario)
+	modal_body.move_child(scenario,1) # Keep map selection above the scrollable briefing.
 	modal_actions = VBoxContainer.new()
 	modal.add_child(modal_actions)
 	refresh_ui()
@@ -539,7 +544,7 @@ func toggle_pause():
 		clear_children(modal_actions)
 		modal_actions.add_child(button("Resume",toggle_pause))
 		modal_actions.add_child(button("Army & graphics settings",show_settings))
-		modal_actions.add_child(button("Restart expedition",restart_match))
+		modal_actions.add_child(button("New game / choose map",restart_match))
 
 func show_settings():
 	if is_instance_valid(settings_panel): return
@@ -1091,7 +1096,7 @@ func _process(dt):
 		modal_title.text = {"victory":"THE FRONTIER IS YOURS","defeat":"EXPEDITION LOST","draw":"STALEMATE"}[sim.result]
 		modal_desc.text = "Match complete in %d:%02d.\n\nEnemy units destroyed: %d\nRebuild your strategy and deploy again." % [int(sim.time)/60,int(sim.time)%60,sim.players[0].kills]
 		clear_children(modal_actions)
-		modal_actions.add_child(button("New expedition",restart_match))
+		modal_actions.add_child(button("New game / choose map",restart_match))
 
 func test_call(args):
 	if args.is_empty(): return
