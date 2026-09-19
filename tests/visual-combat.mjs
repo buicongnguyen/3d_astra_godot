@@ -23,6 +23,10 @@ try{
     await page.screenshot({path:`test-results/visual-weapons-${viewport.width}.png`});
     assert.ok((await state()).visual.shots<=64);
   }
+  await cmd({action:'visual_kill'});assert.ok((await state()).visual.wrecks>0,'death model exists');
+  await cmd({action:'visual_fog',hidden:true});await cmd({action:'visual_advance',seconds:0});
+  assert.equal((await state()).visual.visible_wrecks,0,'fog hides dying models');
+  await cmd({action:'visual_advance',seconds:2});assert.equal((await state()).visual.wrecks,0,'hidden wrecks still expire');
   const palettes=new Set();
   await page.setViewportSize({width:1280,height:800});
   for(let index=0;index<4;index++){

@@ -1136,6 +1136,10 @@ func test_call(args):
 			for i in range(8): sim.spawn(["ranger","tank","antitank","breaker"][i%4],i/4,Vector2(-8+(i%4)*5,16+(i/4)*12))
 			sim.nav.rebuild(sim.entities); sim.update_vision(); sim.visible[0].fill(1); sim.explored[0].fill(1)
 			view.focus = Vector2(0,22); view.zoom = 42; selected.clear()
+		"visual_kill":
+			for e in sim.entities:
+				if e.team == 1 and e.kind == "unit": e.hp = 0; break
+			view.refresh(0)
 		"visual_shots":
 			var units = sim.entities.filter(func(e): return e.kind == "unit")
 			for i in range(int(command.get("count",4))):
@@ -1248,7 +1252,7 @@ func publish_state():
 	state.activity = overlay.activity_snapshot
 	state.activity_effects = view.activity_effects.size()
 	state.activity_effect_lives = view.activity_effects.map(func(e): return e.life)
-	state.visual = {"shots":view.shot_effects.size(),"lives":view.shot_effects.map(func(e): return e.life),"combat_motion":view.combat_motion,"water_motion":view.water_motion,"theme":view.theme(),"barrels":view.objects.values().map(func(o): return o.barrels.size()).reduce(func(a,b): return a+b,0)}
+	state.visual = {"wrecks":view.effects.filter(func(e): return e.has("fog_position")).size(),"visible_wrecks":view.effects.filter(func(e): return e.has("fog_position") and e.node.visible).size(),"shots":view.shot_effects.size(),"lives":view.shot_effects.map(func(e): return e.life),"combat_motion":view.combat_motion,"water_motion":view.water_motion,"theme":view.theme(),"barrels":view.objects.values().map(func(o): return o.barrels.size()).reduce(func(a,b): return a+b,0)}
 	state.render_objects = Performance.get_monitor(Performance.RENDER_TOTAL_OBJECTS_IN_FRAME)
 	state.nodes = Performance.get_monitor(Performance.OBJECT_NODE_COUNT)
 	JavaScriptBridge.eval("window.frontierState="+JSON.stringify(state))

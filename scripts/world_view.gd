@@ -464,7 +464,7 @@ func refresh(dt: float):
 				o.ring.visible = false
 				o.animation.play("Death")
 				o.animation.speed_scale = 1
-				effects.append({"node":o.root,"life":1.0})
+				effects.append({"node":o.root,"life":1.0,"fog_position":Vector2(o.root.position.x,o.root.position.z)})
 			else: o.root.queue_free()
 			objects.erase(id)
 	for r in sim.deposits: resource_objects[r.id].visible = r.amount > 0 and sim.discovered(r.p)
@@ -502,6 +502,7 @@ func refresh(dt: float):
 	for effect in activity_effects: effect.life -= dt
 	activity_effects = activity_effects.filter(func(e): return e.life > 0)
 	for effect in effects.duplicate():
+		if effect.has("fog_position"): effect.node.visible = sim.seen(effect.fog_position)
 		var animation = find_animation(effect.node)
 		if animation: animation.speed_scale = 1.0 if dt > 0 else 0.0
 		effect.life -= dt
