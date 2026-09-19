@@ -89,6 +89,10 @@ var last_group = 0
 var last_group_time = 0
 
 func _input(event):
+	# Browser click counts survive slow frames; engine elapsed-time detection may not.
+	if OS.has_feature("web") and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		var click_count = JavaScriptBridge.eval("window.frontierClickCounts?.shift() ?? 0")
+		if click_count != null and int(click_count) > 0: event.double_click = int(click_count) == 2
 	if (event is InputEventScreenTouch or event is InputEventMouseButton) and event.pressed and is_instance_valid(objectives_popup) and objectives_popup.visible:
 		if not objectives_popup.get_global_rect().has_point(event.position) and not objectives_button.get_global_rect().has_point(event.position): objectives_popup.hide()
 	if event is InputEventKey and handle_hotkey(event):
@@ -111,6 +115,14 @@ func _notification(what):
 
 func _ready():
 	if OS.has_feature("web"):
+		JavaScriptBridge.eval("""
+window.frontierClickCounts = [];
+document.getElementById('canvas').addEventListener('mousedown', event => {
+  if (event.button !== 0) return;
+  window.frontierClickCounts.push(event.detail);
+  if (window.frontierClickCounts.length > 16) window.frontierClickCounts.shift();
+}, true);
+""")
 		get_window().content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
 	touch_device = bool(JavaScriptBridge.eval("matchMedia('(pointer: coarse)').matches")) if OS.has_feature("web") else DisplayServer.is_touchscreen_available()
 	settings.eco = touch_device
