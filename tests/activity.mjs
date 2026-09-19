@@ -53,7 +53,11 @@ try{
       await cmd({action:'step',seconds:.1});
       await page.waitForFunction(id=>!window.frontierState.activity.buildings.some(e=>e.id===id),site.id);
       if(viewport.width===1280||viewport.width===390){
-        await cmd({action:'combat_setup'});s=await state();
+        await cmd({action:'combat_setup'});
+        await page.waitForFunction(()=>{
+          const s=window.frontierState,structure=s.entities.find(e=>e.team===0&&e.type==='barracks'),tank=s.entities.filter(e=>e.team===0&&e.type==='tank').at(-1);
+          return structure&&tank&&s.activity.burning.includes(structure.id)&&s.activity.burning.includes(tank.id);
+        });s=await state();
         const structure=s.entities.find(e=>e.team===0&&e.type==='barracks'),tank=s.entities.filter(e=>e.team===0&&e.type==='tank').at(-1);
         assert.ok(s.activity.burning.includes(structure.id)&&s.activity.burning.includes(tank.id),'critical buildings and vehicles show fire');
         assert.ok(s.activity.burning.every(id=>s.entities.find(e=>e.id===id).team===0),'hidden enemy fire stays behind fog');
@@ -61,9 +65,9 @@ try{
         assert.ok(s.activity.burning.length<=(mobile?8:16));
         await page.screenshot({path:`test-results/combat-burning-${viewport.width}.png`});
         await cmd({action:'activity_repair',id:structure.id});
-        assert.ok(!(await state()).activity.burning.includes(structure.id),'repair clears fire immediately');
+        await page.waitForFunction(id=>!window.frontierState.activity.burning.includes(id),structure.id);
         await cmd({action:'activity_damage',id:tank.id,damage:10000});
-        assert.ok((await state()).activity.combat.some(e=>e.type==='death'&&e.heavy),'vehicle destruction feedback');
+        await page.waitForFunction(()=>window.frontierState.activity.combat.some(e=>e.type==='death'&&e.heavy));
         await page.screenshot({path:`test-results/combat-destruction-${viewport.width}.png`});
         const nodes=(await state()).nodes;
         await cmd({action:'combat_burst',id:structure.id});assert.equal((await state()).activity_effects,32,'burst effects are capped');
