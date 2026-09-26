@@ -1031,7 +1031,7 @@ func refresh_ui():
 				var short_name = {"hq":"Core","tower":"Tower"}.get(type,d.name)
 				actions.add_child(command_button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type),hotkey_config.actionKeys[["relay","barracks","foundry","tower","hq"].find(type)],type,short_name,d.cost))
 		else:
-			if entities.any(func(u): return u.type == "worker"): actions.add_child(command_button("Repair",func(): mode = "repair","R","engineer"))
+			if entities.any(func(u): return u.type == "worker"): actions.add_child(command_button("Repair",func(): mode = "repair","","engineer"))
 			if entities.any(func(u): return u.get("support",0) > 0): actions.add_child(command_button("Support",func(): mode = "support","","engineer" if e.type == "engineer" else "medic"))
 			actions.add_child(command_button("Move",func(): mode = "move"))
 			actions.add_child(command_button("Attack-move",func(): mode = "attack"))
