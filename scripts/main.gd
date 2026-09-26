@@ -775,7 +775,7 @@ func context_order(screen: Vector2,attack: bool = false):
 			var helpers = ids.filter(func(id): return sim.support_valid(sim.entity(id),target))
 			sim.issue(helpers,{"type":"support","target":target.id},append)
 			ids = ids.filter(func(id): return not helpers.has(id))
-			var repairers = ids.filter(func(id): return sim.repair_valid(sim.entity(id),target) and not (target.type == "hq" and sim.entity(id).carry > 0))
+			var repairers = ids.filter(func(id): return sim.repair_valid(sim.entity(id),target) and target.hp < target.max_hp and not (target.type == "hq" and sim.entity(id).carry > 0))
 			sim.issue(repairers,{"type":"repair","target":target.id},append)
 			ids = ids.filter(func(id): return not repairers.has(id))
 		if target.kind == "resource" or (target.get("team",-1) == 0 and (not target.complete or target.type == "hq")):

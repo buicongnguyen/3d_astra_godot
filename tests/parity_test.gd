@@ -56,6 +56,16 @@ func run():
 	check(game.actions.get_children().any(func(button): return button.get_meta("command_label",button.text) == "Repair"),"Harvester menu exposes repair action")
 	check(game.sim.map_id == "highlands" and game.sim.players.size() == 4 and game.sim.coalition,"UI applies seven maps and faction settings")
 	check(game.view.colors.size() == 4,"renderer supports four teams")
+	var own_core = game.sim.own(0).filter(func(e): return e.type == "hq")[0]
+	var worker = game.sim.own(0).filter(func(e): return e.type == "worker")[0]
+	game.selected = [worker.id]; game.view.focus = own_core.p; game.view.update_camera()
+	var core_screen = game.view.camera.unproject_position(Vector3(own_core.p.x,2.6,own_core.p.y))
+	game.context_order(core_screen)
+	check(not worker.orders.is_empty() and worker.orders[0].type == "deliver","full headquarters retains return-cargo context order")
+	own_core.hp -= 10; game.context_order(core_screen)
+	check(not worker.orders.is_empty() and worker.orders[0].type == "repair","damaged headquarters offers repair to empty worker")
+	worker.carry = 1; game.context_order(core_screen)
+	check(not worker.orders.is_empty() and worker.orders[0].type == "deliver","cargo delivery takes priority over repair")
 	game.restart_match(); game.play_mode.select(1); game.campaign_choice.select(0); game.start_match()
 	check(game.campaign_index == 0 and game.sim.ai_speed == "relaxed","campaign applies stage rules")
 	game.campaign_progress = {}; game.campaign_choice.select(6); var previous = game.sim; game.start_match()
