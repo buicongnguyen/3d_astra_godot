@@ -11,7 +11,7 @@ func setup(level: int = 1) -> Dictionary:
 	sim.time=200;core.level=2;core.supply=100;barracks.level=level
 	for i in range(5): sim.spawn("worker",1,Vector2(32+i,-16))
 	sim.spawn("foundry",1,Vector2(10,-34)).level=2
-	sim.players[1].alloy=75;sim.players[1].energy=0
+	sim.players[1].alloy=100;sim.players[1].energy=0
 	return {"sim":sim,"b":barracks}
 func _initialize():
 	for map in ["basin","expanse"]:
@@ -33,7 +33,7 @@ func _initialize():
 		check(fixture.b.queue.size() == 1 and fixture.b.queue[0].type == "vanguard","affordable defense without upgrade/support starvation")
 		check(fixture.sim.players[1].alloy == 0 and fixture.sim.players[1].energy == 0,"AI pays exact cost")
 	var fixture = setup()
-	fixture.sim.players[1].alloy=175;fixture.sim.players[1].energy=50
+	fixture.sim.players[1].alloy=200;fixture.sim.players[1].energy=50
 	fixture.sim.enqueue(fixture.b.id,"vanguard",1)
 	fixture.sim.update_ai()
 	check(fixture.b.queue.size() == 1 and fixture.b.level_job.is_empty(),"affordable upgrade waits for queued production")

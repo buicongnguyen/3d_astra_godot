@@ -128,11 +128,11 @@ func run():
 	enemy_hq.shield = 0 # Isolate the research HP damage assertion from shield absorption.
 	old = enemy_hq.hp
 	sim.hit(ranger,enemy_hq)
-	check(is_equal_approx(old-enemy_hq.hp,13.2),"research updates existing combat units")
+	check(is_equal_approx(old-enemy_hq.hp,14.3),"research updates existing combat units")
 	var new_ranger = sim.spawn("ranger",0,Vector2(-10,18))
 	old = enemy_hq.hp
 	sim.hit(new_ranger,enemy_hq)
-	check(is_equal_approx(old-enemy_hq.hp,13.2),"research applies to newly produced combat units")
+	check(is_equal_approx(old-enemy_hq.hp,14.3),"research applies to newly produced combat units")
 	worker = first(sim,"worker")
 	sim.issue([worker.id],{"type":"gather","target":sim.deposits[0].id})
 	sim.deposits[0].amount = 0

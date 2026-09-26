@@ -42,6 +42,7 @@ jobs:
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/activity_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/harvesters_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/assets_test.gd
+          Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/parity_test.gd
       - name: Export Web and Windows
         run: |
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --export-release Web
@@ -69,7 +70,11 @@ jobs:
       matrix:
         include:
           - name: desktop
-            scripts: browser hotkeys pc-controls
+            scripts: browser
+          - name: hotkeys
+            scripts: hotkeys
+          - name: pc-controls
+            scripts: pc-controls
           - name: mobile-density
             scripts: mobile-density
           - name: maps

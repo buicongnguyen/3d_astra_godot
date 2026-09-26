@@ -16,6 +16,17 @@ var ai_enabled = true
 var ai_clock = 0.0
 var vision_clock = 0.0
 var wave_at = 85.0
+var wave_times: Array = []
+var enemy_count = 1
+var ai_speed = "normal"
+var pace: Dictionary
+var coalition = false
+var known_cores: Array = []
+var scout_index: Array = []
+var offensive_at = 0.0
+var raid_at = 0.0
+var launched: Array = []
+var distress: Dictionary = {}
 var map_id = "riverlands"
 var map_config: Dictionary
 var message = "Assign Harvesters to the amber alloy deposits."
@@ -23,20 +34,31 @@ var message = "Assign Harvesters to the amber alloy deposits."
 func feedback(text: String,team: int):
 	if team == 0: message = text
 
-func _init(ai: bool = true, river: bool = true, stage_id: String = ""):
+func _init(ai: bool = true, river: bool = true, stage_id: String = "", options: Dictionary = {}):
 	Catalog.load_data()
 	ai_enabled = ai
+	enemy_count = clampi(int(options.get("enemies",1)),1,3)
+	var speeds = JSON.parse_string(FileAccess.get_file_as_string("res://data/ai-speeds.json"))
+	ai_speed = options.get("speed","normal") if speeds.has(options.get("speed","normal")) else "normal"
+	pace = speeds[ai_speed]
+	coalition = options.get("alliance","ffa") == "coalition" and enemy_count > 1
+	offensive_at = pace.firstWave+25
+	raid_at = offensive_at-20
 	map_id = stage_id if Catalog.maps.has(stage_id) else ("riverlands" if river else "classic")
 	map_config = Catalog.maps[map_id]
 	nav.river = map_config.river
 	nav.half = map_config.size/2.0
 	nav.grid_size = int(map_config.size/2)
-	for team in range(2):
-		players.append({"alloy":450.0,"energy":150.0,"upgrade":false,"kills":0})
+	for team in range(enemy_count+1):
+		wave_times.append(pace.firstWave+maxi(0,team-1)*15)
+		scout_index.append(0)
+		players.append({"alloy":450.0,"energy":150.0,"upgrade":false,"kills":0,"eliminated":false})
 		var v = PackedByteArray()
 		v.resize(nav.grid_size*nav.grid_size)
 		visible.append(v.duplicate())
 		explored.append(v.duplicate())
+	var starting_deposits = []
+	for team in range(2):
 		var side = 1 if team == 0 else -1
 		spawn("hq",team,Vector2(-25,24)*side)
 		spawn("barracks",team,Vector2(-16,25)*side)
@@ -46,6 +68,7 @@ func _init(ai: bool = true, river: bool = true, stage_id: String = ""):
 		spawn("vanguard",team,Vector2(-12,17)*side)
 		for p in [Vector2(-36,18),Vector2(-37,22),Vector2(-35,26)]: resource("alloy",p*side,2000)
 		resource("energy",Vector2(-30,34)*side,1750)
+		starting_deposits.append_array(deposits.slice(-4))
 		var shift = Vector2(-map_config.offset,map_config.offset)*side
 		for e in own(team): e.p += shift
 		for r in deposits.slice(-4): r.p += shift
@@ -56,8 +79,22 @@ func _init(ai: bool = true, river: bool = true, stage_id: String = ""):
 			resource("alloy",p*side,3000)
 			resource("alloy",(p+Vector2(4,0))*side,3000)
 			resource("energy",(p+Vector2(2,5))*side,2250)
+	for team in range(2,players.size()):
+		var reflection = Vector2(-1,1) if team == 2 else Vector2(1,-1)
+		for e in own(0): spawn(e.type,team,e.p*reflection)
+		for r in deposits.slice(0,4):
+			resource(r.type,r.p*reflection,r.initial)
+			starting_deposits.append(deposits[-1])
+	if enemy_count > 1:
+		deposits = deposits.filter(func(r): return starting_deposits.has(r) or (not entities.any(func(e): return e.kind == "building" and e.p.distance_to(r.p) < e.radius+r.radius+2) and not starting_deposits.any(func(other): return other.p.distance_to(r.p) < other.radius+r.radius+1)))
+	for team in range(players.size()):
+		var known = {}
+		for e in entities:
+			if e.type == "hq" and hostile(team,e.team): known[e.id] = {"id":e.id,"team":e.team,"p":e.p}
+		known_cores.append(known)
 	nav.rebuild(entities)
 	update_vision()
+	if options.has("bonus"): reinforce(options.bonus)
 
 func resource(type: String,p: Vector2,amount: int):
 	deposits.append({"id":next_id,"type":type,"kind":"resource","p":p,"amount":amount,"initial":amount,"radius":1.7})
@@ -105,7 +142,7 @@ func discovered(p: Vector2,team: int = 0) -> bool:
 	return explored[team][c.y*nav.grid_size+c.x] == 1
 
 func update_vision():
-	for team in range(2):
+	for team in range(players.size()):
 		visible[team].fill(0)
 		for e in own(team):
 			var c = nav.cell(e.p)
@@ -115,9 +152,14 @@ func update_vision():
 					if e.p.distance_to(Vector2(x*2-nav.half+1,y*2-nav.half+1)) <= e.vision:
 						visible[team][y*nav.grid_size+x] = 1
 						explored[team][y*nav.grid_size+x] = 1
+	if coalition:
+		for i in range(visible[1].size()):
+			var sight = 0; var known = 0
+			for team in range(1,players.size()): sight |= visible[team][i]; known |= explored[team][i]
+			for team in range(1,players.size()): visible[team][i] = sight; explored[team][i] = known
 
 func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
-	if result != "" or not order.get("type","") in ["move","attackmove","patrol","attack","gather","deliver","build","support","stop"]: return
+	if result != "" or not order.get("type","") in ["move","attackmove","patrol","attack","gather","deliver","build","support","repair","stop"]: return
 	if order.type in ["move","attackmove","patrol"] and (not order.get("p") is Vector2 or not order.p.is_finite()): return
 	var units = []
 	for id in ids:
@@ -128,10 +170,11 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 		var e = units[i]
 		if order.type == "patrol" and (e.type == "worker" or e.get("damage",0) <= 0): continue
 		var target = entity(order.get("target",0))
-		if order.type == "attack" and (target.is_empty() or target.get("team",team) == team or not seen(target.p,team)): continue
-		if order.type in ["gather","deliver","build"] and e.type != "worker": continue
+		if order.type == "attack" and (target.is_empty() or not hostile(team,target.get("team",team)) or not seen(target.p,team)): continue
+		if order.type in ["gather","deliver","build","repair"] and e.type != "worker": continue
 		if order.type == "gather" and (target.is_empty() or target.kind != "resource"): continue
 		if order.type == "build" and (target.is_empty() or target.get("team",-1) != team or target.kind != "building" or target.complete): continue
+		if order.type == "repair" and not repair_valid(e,target): continue
 		if order.type == "support" and not support_valid(e,target): continue
 		if order.type == "attack" and e.get("support",0) > 0:
 			feedback(e.name+" cannot attack. Use Support on a friendly target.",team)
@@ -152,6 +195,8 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 			e.path.clear()
 			e.path_clock = 0
 			e.stalled = 0
+			e.move_sample = null
+			e.firing = {}
 		if o.type != "stop" and e.orders.size() < 32: e.orders.append(o)
 
 func enqueue(id: int,type: String,team: int = 0) -> bool:
@@ -215,7 +260,7 @@ func tech_level(team: int) -> int:
 	return level
 
 func level_cost(b: Dictionary) -> Array:
-	return [200,100] if b.type == "hq" and b.level == 1 else ([350,175] if b.type == "hq" else [100*b.level,50*b.level])
+	return [200,100] if b.type == "hq" and b.level == 1 else ([350,175] if b.type == "hq" else ([75*b.level,25*b.level] if b.type == "tower" else [100*b.level,50*b.level]))
 
 func upgrade_building(id: int,team: int = 0) -> bool:
 	var b = entity(id)
@@ -256,7 +301,8 @@ func update_level(b: Dictionary,dt: float):
 	b.hp += b.max_hp-previous_max
 	b.max_shield = base.shield+25*(b.level-1)
 	if b.has("supply"): b.supply = base.supply+(5*(b.level-1) if b.type == "relay" else 0)
-	if b.has("damage"): b.damage = base.damage*(1+0.25*(b.level-1))
+	if b.has("damage"): b.damage = base.damage*(1+base.get("level_damage",0.25)*(b.level-1))
+	if base.has("level_range"): b.range = base.range+base.level_range*(b.level-1)
 	b.level_job = {}
 	feedback("%s reached level %d." % [b.name,b.level],b.team)
 
@@ -356,6 +402,7 @@ func finish(e: Dictionary):
 	e.moving = false
 
 func reset_worker_route(e: Dictionary):
+	e.move_sample = null
 	e.path.clear()
 	e.path_clock = 0
 	e.stalled = 0
@@ -392,38 +439,32 @@ func move(e: Dictionary,goal: Vector2,dt: float,tolerance: float = 0.25) -> bool
 	if e.p.distance_to(goal) < tolerance:
 		e.path.clear()
 		return true
+	if e.get("move_sample") is Vector2 and e.p.distance_to(e.move_sample) < 0.1: e.stalled += dt
+	else: e.stalled = 0; e.move_sample = e.p
+	if e.stalled > 6:
+		finish(e); feedback(e.name+" cannot reach its destination. Order cleared.",e.team); return false
 	e.path_clock -= dt
 	if e.path_clock <= 0 or e.revision != nav.revision:
 		e.path = nav.path(e.p,goal,e.radius)
 		e.path_clock = 1.4+float(e.id%5)*0.1
 		e.revision = nav.revision
-	if e.path.is_empty():
-		e.stalled += dt
-		if e.stalled > 6:
-			finish(e)
-			feedback(e.name+" cannot reach its destination. Order cleared.",e.team)
-		return false
+	if e.path.is_empty(): return false
 	while not e.path.is_empty() and e.p.distance_to(e.path[0]) < 0.25: e.path.pop_front()
-	if e.path.is_empty(): return true
+	if e.path.is_empty(): return e.p.distance_to(goal) < 2.1
 	var next = e.p.move_toward(e.path[0],e.speed*dt)
 	if not nav.traverse(e.p,next,e.radius):
 		e.path_clock = 0
-		e.stalled += dt
-		if e.stalled > 6:
-			finish(e)
-			feedback(e.name+" cannot reach its destination. Order cleared.",e.team)
 		return false
 	e.angle = atan2(next.x-e.p.x,next.y-e.p.y)
 	e.p = next
 	e.moving = true
-	e.stalled = 0
 	return false
 
 func enemy(e: Dictionary,radius: float,clear_shot: bool = false) -> Dictionary:
 	var best = {}
 	var best_d = radius
 	for t in entities:
-		if t.hp <= 0 or t.team == e.team or not seen(t.p,e.team): continue
+		if t.hp <= 0 or not hostile(e.team,t.team) or not seen(t.p,e.team): continue
 		var d = e.p.distance_to(t.p)-t.radius
 		if d <= best_d+0.00001 and (not clear_shot or nav.clear_line(e.p,t.p,e.id,t.id)):
 			best = t
@@ -446,24 +487,34 @@ func apply_damage(t: Dictionary,damage: float,team: int):
 		if t.kind == "building": nav.rebuild(entities)
 
 func hit(e: Dictionary,t: Dictionary):
-	var damage = attack_value(e)*(1.6 if e.get("counter","") == t.type else 1.0)*(e.get("mechanical_bonus",1) if t.get("mechanical",false) else 1)
-	apply_damage(t,damage,e.team)
-	if e.type == "breaker":
+	apply_damage(t,victim_damage(e,t),e.team)
+	if e.get("splash_radius",0) > 0:
 		for other in entities:
-			if other.id != t.id and other.team != e.team and other.p.distance_to(t.p) < 3: apply_damage(other,damage*0.5,e.team)
+			if other.id != t.id and hostile(e.team,other.team) and other.p.distance_to(t.p) < e.splash_radius: apply_damage(other,victim_damage(e,other)*e.splash_damage,e.team)
 	events.append({"type":"shot","p":e.p,"to":t.p,"team":e.team,"weapon":e.type,"source":e.id})
 	e.cooldown = e.interval
 
 func fight(e: Dictionary,t: Dictionary,dt: float,chase: bool = true) -> bool:
-	if e.get("damage",0) <= 0 or t.is_empty() or t.get("hp",0) <= 0 or t.team == e.team or not seen(t.p,e.team): return false
-	if e.p.distance_to(t.p) <= e.range+t.radius+0.00001 and nav.clear_line(e.p,t.p,e.id,t.id):
+	if e.get("damage",0) <= 0 or t.is_empty() or t.get("hp",0) <= 0 or not hostile(e.team,t.team) or not seen(t.p,e.team): return false
+	var in_range = e.p.distance_to(t.p) <= e.range+t.radius+0.00001
+	if in_range and nav.clear_line(e.p,t.p,e.id,t.id):
 		e.angle = atan2(t.p.x-e.p.x,t.p.y-e.p.y)
+		e.moving = false
 		if e.cooldown <= 0: hit(e,t)
-	elif chase and e.kind == "unit": move(e,approach(e,t,maxf(1.2,e.range*0.7)),dt)
+	elif chase and e.kind == "unit":
+		if no_firing_position(e,t): return false
+		if not in_range: move(e,approach(e,t,maxf(1.2,e.range*0.7)),dt); return true
+		var goal = firing_position(e,t)
+		if goal.is_empty(): return false
+		if move(e,goal.p,dt) or e.stalled > 3:
+			goal.failed = true; e.stalled = 0; e.move_sample = null; e.path_clock = 0
 	return true
 
 func update_worker(e: Dictionary,o: Dictionary,dt: float):
 	var t = entity(o.get("target",0))
+	if o.type == "repair":
+		if not repair(e,t,dt): finish(e)
+		return
 	if o.type == "build":
 		if t.is_empty() or t.get("team",-1) != e.team or t.kind != "building" or t.complete:
 			finish(e)
@@ -546,67 +597,100 @@ func update_production(b: Dictionary,dt: float):
 		if entities.any(func(e): return e.hp > 0 and e.kind == "unit" and e.p.distance_to(p) < e.radius+d.radius+0.2): continue
 		b.queue.pop_front()
 		var u = spawn(q.type,b.team,p)
-		if b.rally != null: issue([u.id],{"type":"move","p":b.rally},false,b.team)
+		var deposit = entity(b.get("rally_target",0))
+		if u.type == "worker" and not deposit.is_empty() and deposit.kind == "resource": issue([u.id],{"type":"gather","target":deposit.id},false,b.team)
+		elif b.rally != null: issue([u.id],{"type":"move","p":b.rally},false,b.team)
 		return
 	q.blocked = "Exit blocked"
 
-func update_ai():
-	var units = own(1)
+func update_ai(team: int = 1):
+	var units = own(team)
+	if not units.any(func(e): return e.type == "hq"): return
+	update_known_cores(team)
+	var role = role_of(team)
 	var workers = units.filter(func(e): return e.type == "worker")
 	var army = units.filter(func(e): return e.kind == "unit" and e.type != "worker")
 	for i in range(workers.size()):
 		var w = workers[i]
 		if not w.orders.is_empty(): continue
 		var type = "energy" if i%4 == 0 else "alloy"
-		var resources = deposits.filter(func(r): return r.amount > 0 and r.type == type and discovered(r.p,1))
+		var resources = deposits.filter(func(r): return r.amount > 0 and r.type == type and discovered(r.p,team))
 		resources.sort_custom(func(a,b): return w.p.distance_squared_to(a.p) < w.p.distance_squared_to(b.p))
-		if not resources.is_empty(): issue([w.id],{"type":"gather","target":resources[0].id},false,1)
+		if not resources.is_empty(): issue([w.id],{"type":"gather","target":resources[0].id},false,team)
 	var headquarters = units.filter(func(e): return e.type == "hq" and e.complete)
-	if not headquarters.is_empty() and workers.size() < 9 and headquarters[0].queue.is_empty(): enqueue(headquarters[0].id,"worker",1)
-	var pop = population(1)
+	if not headquarters.is_empty() and workers.size() < pace.workers and headquarters[0].queue.is_empty(): enqueue(headquarters[0].id,"worker",team)
+	for site in units.filter(func(e): return e.kind == "building" and not e.complete):
+		if workers.any(func(w): return w.orders.any(func(o): return o.type == "build" and o.target == site.id)): continue
+		if site.progress > site.get("ai_progress",-1): site.ai_progress = site.progress; site.ai_retries = 0
+		var available = workers.filter(func(w): return not w.orders.any(func(o): return o.type == "build"))
+		available.sort_custom(func(x,y): return x.p.distance_squared_to(site.p) < y.p.distance_squared_to(site.p))
+		if available.is_empty(): continue
+		site.ai_retries = site.get("ai_retries",0)+1
+		if site.ai_retries > 3: cancel_building(site.id,team)
+		else: issue([available[0].id],{"type":"build","target":site.id},false,team)
+	var pop = population(team)
 	var want = ""
 	if not units.any(func(e): return e.type == "barracks"): want = "barracks"
 	elif pop.cap-pop.used-pop.reserved < 5 and pop.cap < 100: want = "relay"
-	elif time > 100 and not units.any(func(e): return e.type == "foundry"): want = "foundry"
-	if want != "" and not workers.is_empty() and can_pay(1,Catalog.get_def(want).cost) and not units.any(func(e): return not e.complete):
+	elif time > pace.foundryAt*(0.6 if role == "siege" else 1) and not units.any(func(e): return e.type == "foundry"): want = "foundry"
+	elif pace.get("secondBarracks",0) > 0 and time > pace.secondBarracks and units.filter(func(e): return e.type == "barracks").size() < 2: want = "barracks"
+	elif pace.towerAt != null and time > pace.towerAt and units.any(func(e): return e.type == "foundry" and e.complete) and units.filter(func(e): return e.type == "tower").size() < pace.towers+(1 if role == "siege" else 0): want = "tower"
+	if want != "" and not workers.is_empty() and can_pay(team,Catalog.get_def(want).cost) and not units.any(func(e): return not e.complete):
 		var built = false
-		for radius in [10,17,23]:
-			for i in range(12):
-				var p = (headquarters[0].p if not headquarters.is_empty() else Vector2(25+map_config.offset,-24-map_config.offset))+Vector2(cos(float(i)/12*TAU),sin(float(i)/12*TAU))*radius
-				if placement(want,p,1) == "" and not build(workers[0].id,want,p,1).is_empty():
+		for radius in ([11,14,17] if want == "tower" else [10,17,23]):
+			for i in ([0,1,-1,2,-2,3,-3] if want == "tower" else range(12)):
+				var core_p = headquarters[0].p if not headquarters.is_empty() else units[0].p
+				var angle = (-core_p).angle()+i*0.35 if want == "tower" else float(i)/12*TAU
+				var p = core_p+Vector2.from_angle(angle)*radius
+				if placement(want,p,team) == "" and not build(workers[0].id,want,p,team).is_empty():
 					built = true
 					break
 			if built: break
-	if time > 160 and not headquarters.is_empty() and workers.size() >= 9:
+	if time > pace.techAt[0] and not headquarters.is_empty() and workers.size() >= mini(9,pace.workers):
 		var core = headquarters[0]
-		if core.level < (3 if time > 300 else 2) and core.queue.is_empty(): upgrade_building(core.id,1)
+		if core.level < (3 if time > pace.techAt[1] else 2) and core.queue.is_empty(): upgrade_building(core.id,team)
 	for b in units:
 		if not b.get("level_job",{}).is_empty(): continue
-		if b.complete and b.type in ["barracks","foundry"] and b.level < tech_level(1) and time > 190 and can_pay(1,level_cost(b)):
-			if b.queue.is_empty(): upgrade_building(b.id,1)
+		if b.complete and b.type in ["barracks","foundry"] and b.level < tech_level(team) and time > pace.upgradeAt and can_pay(team,level_cost(b)):
+			if b.queue.is_empty(): upgrade_building(b.id,team)
 			continue
 		if b.complete and b.type in ["barracks","foundry"] and b.queue.size() < 2:
-			var choice = "breaker" if b.type == "foundry" else ("vanguard" if floori(time/4)%3 == 0 else "ranger")
-			if b.type == "foundry" and b.level >= 3 and army.filter(func(e): return e.type == "tank").size() <= army.filter(func(e): return e.type == "breaker").size(): choice = "tank"
+			var choice = "breaker" if b.type == "foundry" else ("vanguard" if (floori(time/4)%3 == 0 or (role == "raider" and floori(time/4)%3 == 1)) else "ranger")
+			if b.type == "foundry" and b.level >= 3 and army.filter(func(e): return e.type == "tank").size() <= army.filter(func(e): return e.type == "breaker").size()+(2 if role == "siege" else 0): choice = "tank"
 			if b.type == "barracks" and b.level >= 2 and army.filter(func(e): return e.type == "antitank").size() < 3: choice = "antitank"
 			var support_type = "engineer" if b.type == "foundry" else "medic"
 			if b.level >= 2 and army.filter(func(e): return e.type == support_type).size() < 2: choice = support_type
 			var choices = [choice]
 			for fallback in (["ranger","vanguard"] if b.type == "barracks" else ["breaker"]):
 				if not fallback in choices: choices.append(fallback)
-			var capacity = population(1)
+			var capacity = population(team)
 			for type in choices:
 				var d = Catalog.get_def(type)
-				if b.level >= d.get("required_level",1) and can_pay(1,d.cost) and capacity.used+capacity.reserved+d.pop <= capacity.cap:
-					enqueue(b.id,type,1)
+				if b.level >= d.get("required_level",1) and can_pay(team,d.cost) and capacity.used+capacity.reserved+d.pop <= capacity.cap:
+					enqueue(b.id,type,team)
 					break
-	var threat = {}
-	if not headquarters.is_empty(): threat = enemy(headquarters[0],25)
-	if not threat.is_empty():
-		issue(army.filter(func(e): return e.get("damage",0) > 0 and (e.orders.is_empty() or e.orders[0].type != "attack")).map(func(e): return e.id),{"type":"attack","target":threat.id},false,1)
-	elif time >= wave_at and army.size() >= 4:
-		issue(army.map(func(e): return e.id),{"type":"attackmove","p":Vector2(-25-map_config.offset,24+map_config.offset)},false,1)
-		wave_at = time+50
+	var hq = headquarters[0] if not headquarters.is_empty() else {}
+	var threats = [] if hq.is_empty() else entities.filter(func(e): return e.hp > 0 and hostile(team,e.team) and seen(e.p,team) and e.p.distance_to(hq.p) < 25)
+	if not hq.is_empty(): threats.sort_custom(func(x,y): return x.p.distance_squared_to(hq.p) < y.p.distance_squared_to(hq.p))
+	var ids = threats.map(func(e): return e.id)
+	var incursion = false
+	if not threats.is_empty():
+		var power = 0.0
+		for e in threats: power += 4 if e.kind == "building" else (0.5 if e.type == "worker" else e.get("pop",1))
+		incursion = power >= 4
+		var ready = army.filter(func(e): return e.get("damage",0) > 0 and (e.orders.is_empty() or e.orders[0].type != "attack"))
+		var home = ready.filter(func(e): return e.p.distance_to(hq.p) < 40)
+		ready.sort_custom(func(x,y): return x.p.distance_squared_to(hq.p) < y.p.distance_squared_to(hq.p))
+		var answer = ready if incursion else (home if not home.is_empty() else ready.slice(0,2))
+		issue(answer.map(func(e): return e.id),{"type":"attack","target":threats[0].id},false,team)
+	var wave = army.filter(func(e): return e.orders.is_empty() or e.orders[0].type != "attack" or not ids.has(e.orders[0].target))
+	if coalition: coalition_orders(team,hq,army,wave,incursion); return
+	if not incursion and time >= wave_times[team] and wave.size() >= pace.minWave:
+		var cores = known_cores[team].values()
+		if not hq.is_empty(): cores.sort_custom(func(x,y): return x.p.distance_squared_to(hq.p) < y.p.distance_squared_to(hq.p))
+		var target = cores[0].p if not cores.is_empty() else scout_destination(team)
+		if target != null: issue(wave.map(func(e): return e.id),{"type":"attackmove","p":target},false,team)
+		wave_times[team] = time+pace.waveGap
 
 func tick(dt: float):
 	if result != "" or dt <= 0 or not is_finite(dt): return
@@ -625,7 +709,7 @@ func tick(dt: float):
 			e.working = false
 			update_level(e,dt)
 			update_production(e,dt)
-			if e.complete and e.has("damage"): fight(e,enemy(e,e.range),dt,false)
+			if e.complete and e.has("damage"): fight(e,defense_target(e),dt,false)
 			continue
 		e.working = false
 		if e.get("support",0) > 0:
@@ -641,16 +725,15 @@ func tick(dt: float):
 				else: finish(e)
 			continue
 		if e.orders.is_empty():
-			if e.type != "worker": fight(e,enemy(e,e.range+2),dt,false)
+			if e.type != "worker": fight(e,enemy(e,e.range,true),dt,false)
 			continue
 		var o = e.orders[0]
-		if o.type in ["gather","deliver","build"]: update_worker(e,o,dt)
+		if o.type in ["gather","deliver","build","repair"]: update_worker(e,o,dt)
 		elif o.type == "attack":
 			if not fight(e,entity(o.target),dt): finish(e)
 		elif o.type == "attackmove":
 			var target = enemy(e,12)
-			if not target.is_empty(): fight(e,target,dt)
-			elif move(e,o.p,dt,1.1): finish(e)
+			if (target.is_empty() or not fight(e,target,dt)) and move(e,o.p,dt,1.1): finish(e)
 		elif o.type == "patrol":
 			if o.origin == null: o.origin = e.p
 			var target = enemy(e,e.range,true)
@@ -682,10 +765,160 @@ func tick(dt: float):
 	if ai_enabled:
 		ai_clock -= dt
 		if ai_clock <= 0:
-			update_ai()
-			ai_clock = 2.5
-	var alive0 = own(0).any(func(e): return e.type == "hq")
-	var alive1 = own(1).any(func(e): return e.type == "hq")
-	if not alive0 or not alive1: result = "draw" if not alive0 and not alive1 else ("victory" if alive0 else "defeat")
+			for team in range(1,players.size()): update_ai(team)
+			if coalition: advance_coalition()
+			ai_clock = pace.think
+	var alive = []
+	var eliminated = false
+	for team in range(players.size()): alive.append(own(team).any(func(e): return e.type == "hq"))
+	for team in range(players.size()):
+		if alive[team] or players[team].eliminated: continue
+		players[team].eliminated = true; eliminated = true
+		for e in own(team): e.hp = 0; e.orders.clear(); e.queue.clear(); e.level_job = {}
+		feedback("Your expedition has been eliminated." if team == 0 else "Enemy %d eliminated: all Command cores destroyed." % team,0)
+	if eliminated: nav.rebuild(entities); update_vision()
+	var enemies_alive = alive.slice(1).has(true)
+	if not alive[0] or not enemies_alive: result = "draw" if not alive[0] and not enemies_alive else ("victory" if alive[0] else "defeat")
 	entities = entities.filter(func(e): return e.hp > 0)
 	if events.size() > 256: events = events.slice(-128)
+
+func hostile(a: int,b: int) -> bool:
+	return a >= 0 and b >= 0 and a != b and not (coalition and a > 0 and b > 0)
+
+func victim_damage(e: Dictionary,t: Dictionary) -> float:
+	return attack_value(e)*(e.get("counter_bonus",1.6) if e.get("counter","") == t.type else 1.0)*(e.get("mechanical_bonus",1.0) if t.get("mechanical",false) else 1.0)
+
+func defense_target(e: Dictionary) -> Dictionary:
+	var best = {}; var rank = 3; var distance = INF
+	for t in entities:
+		if t.hp <= 0 or not hostile(e.team,t.team) or not seen(t.p,e.team): continue
+		var d = e.p.distance_to(t.p)-t.radius
+		var priority = 2 if t.kind != "unit" else (1 if t.type == "worker" else 0)
+		if d <= e.range+0.00001 and (priority < rank or (priority == rank and d < distance)) and nav.clear_line(e.p,t.p,e.id,t.id):
+			best = t; rank = priority; distance = d
+	return best
+
+func no_firing_position(e: Dictionary,t: Dictionary) -> bool:
+	var f = e.get("firing",{})
+	return f.get("exhausted",false) and f.target == t.id and f.revision == nav.revision and f.target_p.distance_to(t.p) < 1
+
+func firing_position(e: Dictionary,t: Dictionary) -> Dictionary:
+	var cached = e.get("firing",{}); var attempt = 0
+	if cached.get("target",-1) == t.id and cached.revision == nav.revision and cached.target_p.distance_to(t.p) < 1:
+		if cached.get("exhausted",false): return {}
+		if not cached.get("failed",false): return cached
+		attempt = cached.attempt+1
+	var rings = [0.7,0.45,0.2]
+	while attempt < rings.size():
+		var best = {}; var r = t.radius+maxf(1.2,e.range*rings[attempt])
+		for i in range(16):
+			var p = t.p+Vector2.from_angle(float(i)/16*TAU)*r
+			if not nav.can_stand(p,e.radius) or not nav.clear_line(p,t.p,e.id,t.id): continue
+			if best.is_empty() or e.p.distance_squared_to(p) < e.p.distance_squared_to(best.p): best = {"p":p}
+		if not best.is_empty():
+			best.merge({"target":t.id,"target_p":t.p,"revision":nav.revision,"attempt":attempt,"exhausted":false})
+			e.firing = best; e.path_clock = 0
+			return best
+		attempt += 1
+	e.firing = {"target":t.id,"target_p":t.p,"revision":nav.revision,"exhausted":true}
+	return {}
+
+func repair_valid(e: Dictionary,t: Dictionary) -> bool:
+	return e.get("type","") == "worker" and t.get("kind","") == "building" and t.get("team",-1) == e.team and t.complete and t.hp > 0
+
+func repair(e: Dictionary,t: Dictionary,dt: float) -> bool:
+	if not repair_valid(e,t) or t.hp >= t.max_hp: return false
+	if e.p.distance_to(t.p) > t.radius+2.2:
+		e.working = false; move(e,approach(e,t),dt); return true
+	e.moving = false; e.angle = atan2(t.p.x-e.p.x,t.p.y-e.p.y)
+	var crew = entities.filter(func(w): return w.id != e.id and w.working and w.hp > 0 and not w.orders.is_empty() and w.orders[0].type == "repair" and w.orders[0].target == t.id)
+	if crew.size() >= 2: e.working = false; return true
+	var gain = minf(10*dt,t.max_hp-t.hp)
+	var due = t.get("repair_due",[0.0,0.0]).duplicate(); var charge = []
+	for i in range(2): due[i] += Catalog.get_def(t.type).cost[i]*0.25*gain/t.max_hp; charge.append(floori(due[i]))
+	if not can_pay(e.team,charge): feedback(resource_shortage(charge,e.team)+" to keep repairing "+t.name+".",e.team); return false
+	pay(e.team,charge)
+	for i in range(2): due[i] -= charge[i]
+	t.repair_due = due; t.hp += gain; e.working = true; e.work += dt
+	if e.work >= 0.6:
+		e.work = 0; events.append({"type":"support","weapon":"repair","p":e.p,"to":t.p,"team":e.team})
+	return t.hp < t.max_hp
+
+func reinforce(bonus: Dictionary):
+	players[0].alloy += bonus.get("alloy",0); players[0].energy += bonus.get("energy",0)
+	var cores = own(0).filter(func(e): return e.type == "hq")
+	if not bonus.get("tower",false) or cores.is_empty(): return
+	var core = cores[0]; var toward = (-core.p).angle()
+	for r in [8,10,12]:
+		for turn in [0,0.4,-0.4,0.8,-0.8]:
+			var p = core.p+Vector2.from_angle(toward+turn)*r
+			if placement("tower",p,0) == "": spawn("tower",0,p); nav.rebuild(entities); update_vision(); return
+
+func update_known_cores(team: int):
+	var known = known_cores[team]
+	for e in entities:
+		if e.hp > 0 and e.type == "hq" and hostile(team,e.team) and seen(e.p,team): known[e.id] = {"id":e.id,"team":e.team,"p":e.p}
+	for id in known.keys():
+		if players[known[id].team].eliminated or (seen(known[id].p,team) and entity(id).is_empty()): known.erase(id)
+
+func scout_destination(team: int):
+	var coordinates = []; var limit = nav.half-8; var value = -limit
+	while value < limit: coordinates.append(value); value += 18
+	coordinates.append(limit)
+	var points = []
+	for row in range(coordinates.size()):
+		var line = []
+		for x in coordinates:
+			var p = Vector2(x,coordinates[row])
+			if nav.can_stand(p,1.05): line.append(p)
+		if row%2: line.reverse()
+		points.append_array(line)
+	var index = scout_index[team]; scout_index[team] += 1
+	return null if points.is_empty() else points[(index+team*3)%points.size()]
+
+func role_of(team: int) -> String:
+	return ["assault","raider","siege"][(team-1)%3] if coalition and team > 0 else "balanced"
+
+func player_core_for(team: int,from: Vector2) -> Dictionary:
+	var cores = known_cores[team].values().filter(func(c): return c.team == 0)
+	cores.sort_custom(func(a,b): return a.p.distance_squared_to(from) < b.p.distance_squared_to(from))
+	return {} if cores.is_empty() else cores[0]
+
+func coalition_orders(team: int,hq: Dictionary,army: Array,wave: Array,incursion: bool):
+	var idle = wave.filter(func(e): return not (e.get("raiding",false) and not e.orders.is_empty()))
+	if incursion: distress[team] = {"p":hq.p,"until":time+12,"answered":[]}
+	else:
+		for ally in distress:
+			var call = distress[ally]
+			if ally == team or call.until < time or call.answered.has(team) or players[ally].eliminated: continue
+			var helpers = idle.filter(func(e): return e.orders.is_empty()).slice(0,ceili(idle.size()/2.0))
+			call.answered.append(team)
+			if not helpers.is_empty(): issue(helpers.map(func(e): return e.id),{"type":"attackmove","p":call.p},false,team)
+	if incursion or hq.is_empty(): return
+	if role_of(team) == "raider" and time >= raid_at:
+		var core = player_core_for(team,hq.p)
+		var resources = deposits.filter(func(r): return r.amount > 0)
+		if not core.is_empty(): resources.sort_custom(func(a,b): return a.p.distance_squared_to(core.p) < b.p.distance_squared_to(core.p))
+		var raiders = idle.filter(func(e): return e.orders.is_empty() or e.orders[0].type == "move")
+		raiders.sort_custom(func(a,b): return a.speed > b.speed); raiders = raiders.slice(0,3)
+		if not core.is_empty() and not resources.is_empty() and raiders.size() >= 2:
+			for e in raiders: e.raiding = true
+			issue(raiders.map(func(e): return e.id),{"type":"attackmove","p":resources[0].p},false,team)
+			feedback("Scouts report enemy raiders heading for your Harvesters.",0)
+		raid_at = offensive_at+pace.waveGap-20
+	if time >= offensive_at and not launched.has(team):
+		var force = idle.filter(func(e): return not e.get("raiding",false) or e.orders.is_empty())
+		var core = player_core_for(team,hq.p); var target = core.get("p",null) if not core.is_empty() else scout_destination(team)
+		var minimum = maxi(2,pace.minWave-2)
+		if target != null and force.size() >= minimum:
+			var commit = maxi(minimum,ceili(force.size()*(0.5+0.4/enemy_count)))
+			force.sort_custom(func(a,b): return a.p.distance_squared_to(target) < b.p.distance_squared_to(target))
+			force = force.slice(0,commit)
+			for e in force: e.raiding = false
+			issue(force.map(func(e): return e.id),{"type":"attackmove","p":target},false,team); launched.append(team)
+
+func advance_coalition():
+	if time < offensive_at: return
+	if not launched.is_empty(): feedback("Joint offensive: %d enemy armies are attacking!" % launched.size(),0)
+	offensive_at = time+(pace.waveGap if not launched.is_empty() else 10)
+	launched.clear()

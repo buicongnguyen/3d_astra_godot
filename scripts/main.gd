@@ -59,6 +59,17 @@ var modal_body: VBoxContainer
 var modal_title: Label
 var modal_desc: Label
 var modal_actions: VBoxContainer
+const MAP_IDS = ["riverlands","classic","basin","expanse","dunes","woodlands","highlands"]
+var match_options = {}
+var campaign_stages = []
+var campaign_index = -1
+var campaign_progress = {}
+var setup_box: VBoxContainer
+var play_mode: OptionButton
+var enemy_choice: OptionButton
+var speed_choice: OptionButton
+var alliance_choice: OptionButton
+var campaign_choice: OptionButton
 var scenario: OptionButton
 var action_signature = ""
 var settings = {"player":0,"enemy":1,"eco":false,"water":true,"combat":true,"detail":true,"muted":false}
@@ -355,12 +366,28 @@ func make_ui():
 	scenario.add_item("Ashen Frontier · 96×96")
 	scenario.add_item("Copper Basin · 128×128")
 	scenario.add_item("Frontier Expanse · 160×160")
+	for id in MAP_IDS.slice(4): scenario.add_item(Catalog.maps[id].name)
 	scenario.custom_minimum_size.y = 44
 	scenario.fit_to_longest_item = false
 	scenario.clip_text = true
 	scenario.tooltip_text = "Choose map / stage"
 	modal_body.add_child(scenario)
 	modal_body.move_child(scenario,1) # Keep map selection above the scrollable briefing.
+	setup_box = VBoxContainer.new()
+	modal_body.add_child(setup_box)
+	modal_body.move_child(setup_box,2)
+	play_mode = setup_choice(["Skirmish","Campaign"])
+	enemy_choice = setup_choice(["1 AI enemy","2 AI enemies","3 AI enemies"])
+	speed_choice = setup_choice(["Relaxed AI","Normal AI","Fast AI","Relentless AI"])
+	speed_choice.select(1)
+	alliance_choice = setup_choice(["Free for all","AI coalition against player"])
+	campaign_stages = JSON.parse_string(FileAccess.get_file_as_string("res://data/campaign.json"))
+	var saved = ConfigFile.new()
+	if saved.load("user://campaign.cfg") == OK: campaign_progress = saved.get_value("campaign","completed",{})
+	campaign_choice = setup_choice(campaign_stages.map(func(stage): return stage.name))
+	play_mode.item_selected.connect(func(_index): refresh_setup())
+	campaign_choice.item_selected.connect(func(_index): refresh_setup())
+	refresh_setup()
 	modal_actions = VBoxContainer.new()
 	modal.add_child(modal_actions)
 	refresh_ui()
@@ -483,16 +510,23 @@ func show_briefing():
 	paused = true
 	modal.visible = true
 	scrim.visible = true
-	scenario.visible = true
+	setup_box.show()
+	refresh_setup()
 	modal_title.text = "FRONTIER COMMAND"
 	modal_desc.text = "MERIDIAN EXPEDITION · GODOT EDITION\n\nBuild an outpost. Command a mixed army. Cross the river and destroy the enemy Command core.\n\nDesktop: drag to select · right-click orders\nWASD pan · wheel zoom · F attack-move · B build · ? shortcuts\nTouch: tap select/order · drag pan · pinch zoom"
 	clear_children(modal_actions)
-	modal_actions.add_child(button("Deploy expedition",start_match))
+	modal_actions.add_child(button("Start",start_match))
 	modal_actions.add_child(button("Army & graphics settings",show_settings))
 
 func start_match():
-	var stage_id = ["riverlands","classic","basin","expanse"][scenario.selected]
-	if sim.map_id != stage_id: reset_sim(scenario.selected == 0,stage_id)
+	var stage_id = MAP_IDS[scenario.selected]
+	campaign_index = campaign_choice.selected if play_mode.selected == 1 else -1
+	match_options = {"enemies":enemy_choice.selected+1,"speed":["relaxed","normal","fast","relentless"][speed_choice.selected],"alliance":"coalition" if alliance_choice.selected == 1 else "ffa"}
+	if campaign_index >= 0:
+		if campaign_index > 0 and not campaign_progress.has(campaign_stages[campaign_index-1].id): return
+		match_options = campaign_stages[campaign_index].duplicate(true)
+		stage_id = match_options.map
+	reset_sim(stage_id == "riverlands",stage_id)
 	started = true
 	paused = false
 	modal.visible = false
@@ -505,7 +539,7 @@ func reset_sim(river: bool, stage_id: String = ""):
 	if is_instance_valid(objectives_popup): objectives_popup.hide()
 	test_manual_clock = false
 	test_visual_freeze = false
-	sim = Simulation.new(true,river,stage_id)
+	sim = Simulation.new(true,river,stage_id,match_options)
 	view.sim = sim
 	view.build_map()
 	view.focus = Vector2(-20-sim.map_config.offset,20+sim.map_config.offset)
@@ -539,6 +573,7 @@ func toggle_pause():
 		pointer_down = false
 		touches.clear()
 		scenario.visible = false
+		setup_box.hide()
 		modal_title.text = "EXPEDITION PAUSED"
 		modal_desc.text = "The battlefield is paused.\n\nX stops selected units. Shift queues orders.\nCtrl + 1–9 saves groups; Shift adds; 1–9 recalls.\nHome focuses selection. H selects the core. B opens construction. Keys lists all shortcuts.\nSelect a building, then right-click for its rally point."
 		clear_children(modal_actions)
@@ -626,7 +661,7 @@ Cost: %d alloy / %d energy · Time: %ds" % [d.cost[0],d.cost[1],d.time]
 		text += "
 Supply: %d · Speed: %.1f" % [d.pop,d.speed]
 		if d.has("counter"): text += "
-Deals 1.6× damage to "+Catalog.get_def(d.counter).name+"."
+Deals %.1f× damage to %s." % [d.get("counter_bonus",1.6),Catalog.get_def(d.counter).name]
 		if d.has("support"): text += "
 Restores %d HP every second within range %.0f; no resource cost. Does not refill shields or revive destroyed targets." % [d.support,d.range]
 		if d.has("required_level"): text += "
@@ -644,9 +679,9 @@ BUILDING FUNCTIONS"
 		text += "
 
 UPGRADES
-L2: +25% base HP, +25 shield. L3: +50% base HP, +50 shield total. Production runs 20% / 40% faster. Towers gain 25% / 50% base attack; Relays gain 5 / 10 supply."
+L2: +25% base HP, +25 shield. L3: +50% base HP, +50 shield total. Production runs 20% / 40% faster. Towers gain 50% / 100% base attack and +1 / +2 range; Relays gain 5 / 10 supply."
 		text += "
-Command core: L2 200/100, L3 350/175. Other buildings: L2 100/50, L3 200/100 (alloy/energy). Upgrades take 20s / 30s."
+Command core: L2 200/100, L3 350/175. Sentinel: L2 75/25, L3 150/50. Other buildings: L2 100/50, L3 200/100 (alloy/energy). Upgrades take 20s / 30s."
 		text += "
 Other buildings require a completed Command core at the next level. Finish or cancel production first. Cancel an upgrade for a full refund; destruction gives no refund."
 	text += "
@@ -706,8 +741,9 @@ func context_order(screen: Vector2,attack: bool = false):
 		for id in selected:
 			var b = sim.entity(id)
 			if b.get("kind","") == "building" and b.complete and not b.get("trains",[]).is_empty():
+				b.rally_target = target.id if target.get("kind","") == "resource" else 0
 				b.rally = p.clamp(Vector2.ONE*(-sim.nav.half+3),Vector2.ONE*(sim.nav.half-3))
-				sim.message = "Rally point set. New units will move here."
+				sim.message = "Resource rally set. New Harvesters will gather here." if b.rally_target > 0 else "Rally point set. New units will move here."
 		mode = ""; return
 	if mode == "target_attack":
 		if target.is_empty() or target.get("team",-1) <= 0 or not sim.seen(target.p,0):
@@ -718,6 +754,14 @@ func context_order(screen: Vector2,attack: bool = false):
 		mode = ""
 		return
 	var order = {"type":"patrol" if mode == "patrol" else ("attackmove" if attack else "move"),"p":p}
+	if mode == "repair":
+		var workers = ids.filter(func(id): return sim.repair_valid(sim.entity(id),target))
+		if workers.is_empty():
+			sim.message = "Repair: choose a damaged friendly building. Up to 2 Harvesters; costs resources."
+			return
+		sim.issue(workers,{"type":"repair","target":target.id},append)
+		mode = ""
+		return
 	if mode == "support":
 		var helpers = ids.filter(func(id): return not target.is_empty() and sim.support_valid(sim.entity(id),target))
 		if helpers.is_empty():
@@ -731,6 +775,9 @@ func context_order(screen: Vector2,attack: bool = false):
 			var helpers = ids.filter(func(id): return sim.support_valid(sim.entity(id),target))
 			sim.issue(helpers,{"type":"support","target":target.id},append)
 			ids = ids.filter(func(id): return not helpers.has(id))
+			var repairers = ids.filter(func(id): return sim.repair_valid(sim.entity(id),target) and not (target.type == "hq" and sim.entity(id).carry > 0))
+			sim.issue(repairers,{"type":"repair","target":target.id},append)
+			ids = ids.filter(func(id): return not repairers.has(id))
 		if target.kind == "resource" or (target.get("team",-1) == 0 and (not target.complete or target.type == "hq")):
 			var workers = ids.filter(func(id): return sim.entity(id).type == "worker")
 			var job = "gather" if target.kind == "resource" else ("build" if not target.complete else "deliver")
@@ -775,7 +822,7 @@ func click_world(point: Vector2,touch: bool = false,same_type: bool = false,doub
 		placement_ready = true
 		if not touch: confirm_build()
 		return
-	if mode in ["attack","move","support","context","rally","patrol","target_attack"]:
+	if mode in ["attack","move","support","repair","context","rally","patrol","target_attack"]:
 		context_order(point,mode == "attack")
 		return
 	var target = view.pick(point)
@@ -899,7 +946,7 @@ func refresh_ui():
 	objectives_button.visible = mobile_layout and started and not paused and sim.result == ""
 	if not objectives_button.visible: objectives_popup.hide()
 	for e in sim.entities:
-		if e.team == 1 and e.kind == "building" and sim.seen(e.p): known_buildings[e.id] = {"p":e.p,"type":e.type}
+		if e.team > 0 and e.kind == "building" and sim.seen(e.p): known_buildings[e.id] = {"p":e.p,"type":e.type,"team":e.team}
 	for id in known_buildings.keys():
 		if sim.seen(known_buildings[id].p) and sim.entity(id).is_empty(): known_buildings.erase(id)
 	var entities = selected.map(func(id): return sim.entity(id))
@@ -984,6 +1031,7 @@ func refresh_ui():
 				var short_name = {"hq":"Core","tower":"Tower"}.get(type,d.name)
 				actions.add_child(command_button("%s %d/%d" % [d.name,d.cost[0],d.cost[1]],func(): begin_build(type),hotkey_config.actionKeys[["relay","barracks","foundry","tower","hq"].find(type)],type,short_name,d.cost))
 		else:
+			if entities.any(func(u): return u.type == "worker"): actions.add_child(command_button("Repair",func(): mode = "repair","R","engineer"))
 			if entities.any(func(u): return u.get("support",0) > 0): actions.add_child(command_button("Support",func(): mode = "support","","engineer" if e.type == "engineer" else "medic"))
 			actions.add_child(command_button("Move",func(): mode = "move"))
 			actions.add_child(command_button("Attack-move",func(): mode = "attack"))
@@ -1093,10 +1141,38 @@ func _process(dt):
 		modal.visible = true
 		scrim.visible = true
 		scenario.visible = false
+		if sim.result == "victory" and campaign_index >= 0:
+			var id = campaign_stages[campaign_index].id
+			campaign_progress[id] = minf(campaign_progress.get(id,INF),sim.time)
+			var saved = ConfigFile.new()
+			saved.set_value("campaign","completed",campaign_progress)
+			if saved.save("user://campaign.cfg") != OK: sim.message = "Campaign progress could not be saved."
 		modal_title.text = {"victory":"THE FRONTIER IS YOURS","defeat":"EXPEDITION LOST","draw":"STALEMATE"}[sim.result]
 		modal_desc.text = "Match complete in %d:%02d.\n\nEnemy units destroyed: %d\nRebuild your strategy and deploy again." % [int(sim.time)/60,int(sim.time)%60,sim.players[0].kills]
 		clear_children(modal_actions)
 		modal_actions.add_child(button("New game / choose map",restart_match))
+		if sim.result == "victory" and campaign_index >= 0 and campaign_index+1 < campaign_stages.size():
+			modal_actions.add_child(button("Next stage",func(): campaign_choice.select(campaign_index+1); start_match()))
+
+func setup_choice(items: Array) -> OptionButton:
+	var choice = OptionButton.new()
+	choice.custom_minimum_size.y = 44
+	choice.fit_to_longest_item = false
+	choice.clip_text = true
+	for item in items: choice.add_item(item)
+	setup_box.add_child(choice)
+	return choice
+
+func refresh_setup():
+	var campaign = play_mode.selected == 1
+	scenario.visible = not campaign
+	enemy_choice.visible = not campaign
+	speed_choice.visible = not campaign
+	alliance_choice.visible = not campaign
+	campaign_choice.visible = campaign
+	if campaign: modal_desc.text = campaign_stages[campaign_choice.selected].story
+	else: modal_desc.text = "Choose a map, enemy count and AI speed. Free for all: rivals fight each other. Coalition: rivals share vision and attack together.\n\nRight-click orders · drag select · WASD pan · wheel zoom · ? shortcuts"
+	for i in range(campaign_stages.size()): campaign_choice.set_item_disabled(i,i > 0 and not campaign_progress.has(campaign_stages[i-1].id))
 
 func test_call(args):
 	if args.is_empty(): return
@@ -1259,6 +1335,10 @@ func publish_state():
 	state.minimap_rect = [minimap_rect.position.x,minimap_rect.position.y,minimap_rect.size.x,minimap_rect.size.y]
 	var ground_probe = view.camera.unproject_position(Vector3(0,0,32))
 	state.ground_probe = [ground_probe.x,ground_probe.y]
+	state.enemies = sim.enemy_count
+	state.ai_speed = sim.ai_speed
+	state.coalition = sim.coalition
+	state.campaign_index = campaign_index
 	state.map_id = sim.map_id
 	state.map_size = sim.nav.half*2
 	state.building_probes = sim.own(0).filter(func(e): return e.kind == "building").map(func(e):
@@ -1344,7 +1424,7 @@ func run_shortcut(id: String):
 		"move","attackmove","context","support","rally":
 			if not es.any(func(u): return (u.kind == "building" and u.complete and not u.get("trains",[]).is_empty()) if id == "rally" else u.kind == "unit"):
 				sim.message = "Select a completed production building first." if id == "rally" else "Select units first."
-			else: mode = "attack" if id == "attackmove" else id
+			else: mode = "attack" if id == "attackmove" else ("repair" if id == "support" and es.any(func(u): return u.type == "worker") else id)
 		"patrol","attack":
 			if es.any(func(u): return u.kind == "unit" and u.get("damage",0) > 0 and (id != "patrol" or u.type != "worker")):
 				mode = "patrol" if id == "patrol" else "target_attack"

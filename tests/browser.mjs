@@ -43,7 +43,7 @@ for(const mobile of [false,true]){
  await press('Army & graphics settings');assert.equal((await state()).settings_open,true);
  await press('High contrast: Gold / Violet');
  await press('Apply settings');assert.equal((await state()).settings.player,3);assert.equal((await state()).started,false);
- await press('Deploy expedition');assert.equal((await state()).started,true);
+ await press('Start');assert.equal((await state()).started,true);
  await page.waitForFunction(()=>window.frontierState.time>0); // normal matches advance in real time
  await cmd({action:'start',manual_clock:true}); // UI checks advance time explicitly, independent of software-renderer speed
  let s=await state();const worker=s.entities.find(e=>e.type==='worker'&&e.team===0);const deposit=s.entities.find(e=>e.type==='alloy');

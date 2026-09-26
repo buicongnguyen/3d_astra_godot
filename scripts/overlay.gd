@@ -25,6 +25,13 @@ func _draw():
 		if e.max_shield > 0:
 			draw_rect(Rect2(point-Vector2(20,6),Vector2(40,3)),Color("15282b"))
 			draw_rect(Rect2(point-Vector2(20,6),Vector2(40*clampf(e.shield/e.max_shield,0,1),3)),Color("69cbee"))
+	for id in game.selected:
+		var building = game.sim.entity(id)
+		if building.get("team",-1) != 0 or not building.get("rally") is Vector2: continue
+		var start = project(building.p,0.3)
+		var end = project(building.rally,0.3)
+		draw_line(start,end,Color(0.5,0.9,0.7,0.5),1.5)
+		draw_arc(end,9,0,TAU,20,Color("92ebc5"),2)
 	draw_activity()
 	if game.dragging and not game.touch_active and game.mode == "":
 		var rect = Rect2(game.pointer_start,game.pointer_now-game.pointer_start).abs()
@@ -50,11 +57,11 @@ func _draw():
 		if e.team != 0 and not game.sim.seen(e.p): continue
 		var p = map_point(e.p)
 		if e.team == 0: draw_circle(p,2.5,game.view.colors[0])
-		else: draw_colored_polygon(PackedVector2Array([p+Vector2(0,-3),p+Vector2(3,0),p+Vector2(0,3),p+Vector2(-3,0)]),game.view.colors[1])
+		else: draw_colored_polygon(PackedVector2Array([p+Vector2(0,-3),p+Vector2(3,0),p+Vector2(0,3),p+Vector2(-3,0)]),game.view.colors[e.team])
 	for memory in game.known_buildings.values():
 		if not game.sim.seen(memory.p):
 			var p = map_point(memory.p)
-			draw_rect(Rect2(p-Vector2(3,3),Vector2(6,6)),Color(game.view.colors[1],0.45),false,1)
+			draw_rect(Rect2(p-Vector2(3,3),Vector2(6,6)),Color(game.view.colors[memory.get("team",1)],0.45),false,1)
 	var focus = map_point(game.view.focus)
 	draw_rect(Rect2(focus-Vector2(10,7),Vector2(20,14)),Color("f4edcb"),false,1)
 

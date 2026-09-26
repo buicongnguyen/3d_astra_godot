@@ -17,7 +17,7 @@ try{
  };
  await page.goto(url+'?test=1');await page.waitForFunction(()=>window.frontierState?.ready,null,{timeout:90000});
  assert.deepEqual((await state()).viewport,[390,844]);
- await press('Deploy expedition');assert.equal((await state()).started,true);
+ await press('Start');assert.equal((await state()).started,true);
  for(const viewport of [{width:320,height:568},{width:390,height:844},{width:800,height:360}]){
    await page.setViewportSize(viewport);await page.waitForFunction(v=>frontierState.viewport[0]===v.width&&frontierState.viewport[1]===v.height,viewport);
    let s=await state();

@@ -9,7 +9,7 @@ var zoom = 44.0
 var objects: Dictionary = {}
 var resource_objects: Dictionary = {}
 var models: Dictionary = {}
-var team_materials: Array = [{},{}]
+var team_materials: Array = [{},{},{},{}]
 var colors: Array = [Color("92ebc5"),Color("ef7660")]
 var terrain: Node3D
 var effects: Array = []
@@ -320,8 +320,8 @@ func paint(node: Node,team: int,legs: Array):
 	for child in node.get_children(): paint(child,team,legs)
 
 func set_colors(player: Color,opponent: Color):
-	colors = [player,opponent]
-	for team in range(2):
+	colors = [player,opponent,Color("c38bfa"),Color("efbb54")]
+	for team in range(4):
 		for mat in team_materials[team].values():
 			mat.albedo_color = colors[team]
 			if mat.emission_enabled: mat.emission = colors[team]
