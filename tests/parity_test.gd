@@ -52,6 +52,8 @@ func run():
 	var game = Main.instantiate(); root.add_child(game); await process_frame
 	game.play_mode.select(0); game.enemy_choice.select(2); game.alliance_choice.select(1); game.scenario.select(6); game.start_match()
 	game.view.refresh(0)
+	game.refresh_ui()
+	check(game.actions.get_children().any(func(button): return button.get_meta("command_label",button.text) == "Repair"),"Harvester menu exposes repair action")
 	check(game.sim.map_id == "highlands" and game.sim.players.size() == 4 and game.sim.coalition,"UI applies seven maps and faction settings")
 	check(game.view.colors.size() == 4,"renderer supports four teams")
 	game.restart_match(); game.play_mode.select(1); game.campaign_choice.select(0); game.start_match()
