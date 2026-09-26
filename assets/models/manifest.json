@@ -1,84 +1,84 @@
 {
-  "generator": "Blender Python",
+  "generator": "Blender Python (frontier_kit)",
   "units": "meters",
   "provenance": "Original assets generated for this repository; no third-party model sources.",
   "assets": [
     {
       "name": "worker",
       "file": "worker.glb",
-      "triangles": 724,
+      "triangles": 3116,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "vanguard",
       "file": "vanguard.glb",
-      "triangles": 748,
+      "triangles": 2872,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "ranger",
       "file": "ranger.glb",
-      "triangles": 704,
+      "triangles": 2996,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "breaker",
       "file": "breaker.glb",
-      "triangles": 968,
+      "triangles": 4520,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "medic",
       "file": "medic.glb",
-      "triangles": 776,
+      "triangles": 2820,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "engineer",
       "file": "engineer.glb",
-      "triangles": 836,
+      "triangles": 2772,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "tank",
       "file": "tank.glb",
-      "triangles": 996,
+      "triangles": 6264,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "antitank",
       "file": "antitank.glb",
-      "triangles": 804,
+      "triangles": 3192,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "hq",
       "file": "hq.glb",
-      "triangles": 1048,
+      "triangles": 4720,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "barracks",
       "file": "barracks.glb",
-      "triangles": 620,
+      "triangles": 2816,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "foundry",
       "file": "foundry.glb",
-      "triangles": 508,
+      "triangles": 3952,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "relay",
       "file": "relay.glb",
-      "triangles": 448,
+      "triangles": 2776,
       "animation": "Runtime articulated parts; no baked clips"
     },
     {
       "name": "tower",
       "file": "tower.glb",
-      "triangles": 484,
+      "triangles": 2080,
       "animation": "Runtime articulated parts; no baked clips"
     }
   ]

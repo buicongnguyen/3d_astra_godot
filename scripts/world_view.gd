@@ -1,5 +1,8 @@
 extends Node3D
 const Catalog = preload("res://scripts/catalog.gd")
+const Scenery = preload("res://scripts/scenery.gd")
+const SelectionShader = preload("res://shaders/selection.gdshader")
+var scenery_library: Node3D
 const Activity = preload("res://scripts/activity.gd")
 const CombatFeedback = preload("res://scripts/combat_feedback.gd")
 var sim
@@ -57,6 +60,11 @@ func setup(simulation):
 		for part in barrels: animated.append(part.node)
 		batch_static_parts(model,animated)
 		models[type] = model
+	scenery_library = load("res://assets/models/environment.glb").instantiate()
+	scenery_library.name = "SceneryLibrary"
+	scenery_library.visible = false
+	add_child(scenery_library)
+	for source in scenery_library.get_children(): batch_static_parts(source,[])
 	var environment = WorldEnvironment.new()
 	var env = Environment.new()
 	world_environment = env
@@ -64,7 +72,7 @@ func setup(simulation):
 	env.background_color = Color("14242c")
 	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	env.ambient_light_color = Color("b7ced0")
-	env.ambient_light_energy = 0.42
+	env.ambient_light_energy = 0.55
 	env.tonemap_mode = Environment.TONE_MAPPER_LINEAR
 	environment.environment = env
 	add_child(environment)
@@ -72,7 +80,7 @@ func setup(simulation):
 	sunlight = light
 	light.rotation_degrees = Vector3(-52,-25,0)
 	light.light_color = Color("fff0d2")
-	light.light_energy = 0.78
+	light.light_energy = 0.95
 	light.shadow_enabled = true
 	light.directional_shadow_max_distance = 110
 	add_child(light)
@@ -186,39 +194,26 @@ func build_map():
 	shot_free.append_array(shot_effects); shot_effects.clear()
 	terrain = Node3D.new()
 	add_child(terrain)
-	box(terrain,Vector3(0,-1,0),Vector3(sim.nav.half*2+2,1,sim.nav.half*2+2),Color("333d36"))
-	# One terrain mesh; vertex colors provide inexpensive surface variation.
+	box(terrain,Vector3(0,-1,0),Vector3(sim.nav.half*2,1,sim.nav.half*2),Color("333d36"))
+	# One terrain mesh and one static texture keep ground rendering inexpensive.
 	var st = SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	for z in range(-int(sim.nav.half),int(sim.nav.half),2):
 		for x in range(-int(sim.nav.half),int(sim.nav.half),2):
 			for corner in [Vector2(0,0),Vector2(0,2),Vector2(2,0),Vector2(2,0),Vector2(0,2),Vector2(2,2)]:
 				var p = Vector2(x,z)+corner
-				var height = -0.38 if sim.nav.river and absf(p.y) <= 3 else 0.0
-				var tint = surface(p)
-				var grain = sin(p.x*17.13+p.y*39.71)*0.018
-				st.set_color(tint.lightened(grain) if grain > 0 else tint.darkened(-grain))
+				var height = -0.5*clampf(4-absf(p.y),0,1) if sim.nav.river and absf(p.x) > 5 else 0.0
+				st.set_uv((p+Vector2.ONE*sim.nav.half)/(sim.nav.half*2))
 				st.set_normal(Vector3.UP)
 				st.add_vertex(Vector3(p.x,height,p.y))
 	var ground = MeshInstance3D.new()
 	ground.mesh = st.commit()
 	var mat = material(Color.WHITE)
-	mat.vertex_color_use_as_albedo = true
+	mat.albedo_texture = ground_texture()
+	mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	ground.material_override = mat
 	terrain.add_child(ground)
-	for rock in Catalog.rocks:
-		var stone = MeshInstance3D.new()
-		var mesh = SphereMesh.new()
-		mesh.radius = rock[2]
-		mesh.height = rock[2]*1.65
-		mesh.radial_segments = 7
-		mesh.rings = 3
-		stone.mesh = mesh
-		stone.position = Vector3(rock[0],rock[2]*0.35,rock[1])
-		stone.rotation.y = rock[0]
-		stone.material_override = material(Color("646d65"))
-		terrain.add_child(stone)
 	if sim.nav.river:
 		var water = MeshInstance3D.new()
 		var plane = PlaneMesh.new()
@@ -227,59 +222,18 @@ func build_map():
 		water.position.y = -0.08
 		water_material = ShaderMaterial.new()
 		var shader = Shader.new()
-		shader.code = "shader_type spatial; render_mode unshaded; uniform float clock = 0.; void fragment(){ float ripple=sin(UV.x*180.+clock*1.1)*sin(UV.y*22.-clock*.6); ALBEDO=mix(vec3(.10,.32,.36),vec3(.30,.57,.58),.45+ripple*.14); }"
+		shader.code = "shader_type spatial; render_mode unshaded; uniform float clock = 0.; void fragment(){ float ripple=sin(UV.x*140.+UV.y*7.+clock*1.1)*0.018+sin(UV.x*83.-UV.y*9.-clock*.6)*0.012; float bank=1.-smoothstep(0.02,0.23,min(UV.y,1.-UV.y)); ALBEDO=mix(vec3(.16,.36,.40),vec3(.36,.55,.52),bank*.5)+vec3(ripple); }"
 		water_material.shader = shader
 		water.material_override = water_material
 		terrain.add_child(water)
-		for x in [-22,22]:
-			box(terrain,Vector3(x,0.03,0),Vector3(10,0.22,7.6),Color("ab9e83"))
-			for edge in [-4.9,4.9]:
-				box(terrain,Vector3(x+edge,0.38,0),Vector3(0.18,0.5,7.8),Color("595f52"))
-		box(terrain,Vector3(0,-0.035,0),Vector3(10,0.05,6),Color("78a7a0"))
 	decorative = Node3D.new()
 	terrain.add_child(decorative)
-	# Bounded landmarks sit entirely beyond the playable boundary.
-	var hill_mesh = SphereMesh.new(); hill_mesh.radial_segments = 7; hill_mesh.rings = 3
-	var hill_mat = material(Color(theme().rock))
-	var hills = MultiMeshInstance3D.new(); var batch = MultiMesh.new()
-	batch.transform_format = MultiMesh.TRANSFORM_3D; batch.mesh = hill_mesh; batch.instance_count = 16
-	for i in range(16):
-		var basis = Basis().scaled(Vector3(6+i%3,2.8 if sim.map_id == "dunes" else 5+i%2,8+i%3))
-		var p = Vector3((1 if i%2 else -1)*(sim.nav.half+7),0.4,-sim.nav.half+8+(i/2)*(sim.nav.half*2-16)/7.0)
-		batch.set_instance_transform(i,Transform3D(basis,p))
-	hills.multimesh = batch; hills.material_override = hill_mat; decorative.add_child(hills)
-	var env_scene = load("res://assets/models/environment.glb") as PackedScene
-	if env_scene:
-		var library = env_scene.instantiate()
-		for i in range(28):
-			var name_hint = "tree" if i < 12 else ("bush" if i < 20 else "reed")
-			var source = find_named(library,name_hint)
-			if source:
-				var item = source.duplicate()
-				decorative.add_child(item)
-				var x = -43+(i*17)%86
-				var z = (-sim.nav.half-4 if i%2 == 0 else sim.nav.half+4) if i < 12 else (-6 if i%2 == 0 else 6)
-				if not sim.nav.river and i >= 12: z = -sim.nav.half-3
-				if sim.map_id == "dunes" and i < 12: item.scale *= 0.45
-				item.position = Vector3(x,0,z)
-				item.rotation.y = i*2.4
-		library.free()
-	for r in sim.deposits:
-		var group = Node3D.new()
-		group.position = Vector3(r.p.x,0,r.p.y)
-		add_child(group)
-		for i in range(5):
-			var crystal = MeshInstance3D.new()
-			var mesh = CylinderMesh.new()
-			mesh.top_radius = 0.04
-			mesh.bottom_radius = 0.55
-			mesh.height = 1.2+float(i%3)*0.5
-			mesh.radial_segments = 5
-			crystal.mesh = mesh
-			crystal.position = Vector3(cos(i*2.4)*0.7,mesh.height*0.5,sin(i*2.4)*0.7)
-			crystal.material_override = material(Color("e8ae52") if r.type == "alloy" else Color("5dc9ed"))
-			group.add_child(crystal)
-		resource_objects[r.id] = group
+	Scenery.build(self)
+	# A thin inset border replaces the overshooting slab and off-map scenery.
+	var boundary = Node3D.new(); boundary.name = "MapBoundary"; terrain.add_child(boundary)
+	for side in [-1,1]:
+		box(boundary,Vector3(side*(sim.nav.half-0.04),0.025,0),Vector3(0.06,0.015,sim.nav.half*2),Color("8a8d70"))
+		box(boundary,Vector3(0,0.025,side*(sim.nav.half-0.04)),Vector3(sim.nav.half*2,0.015,0.06),Color("8a8d70"))
 	fog_image = Image.create(sim.nav.grid_size,sim.nav.grid_size,false,Image.FORMAT_RGBA8)
 	fog_texture = ImageTexture.create_from_image(fog_image)
 	var fog = MeshInstance3D.new()
@@ -327,7 +281,7 @@ func set_colors(player: Color,opponent: Color):
 			if mat.emission_enabled: mat.emission = colors[team]
 	for id in objects:
 		var e = sim.entity(id)
-		if not e.is_empty(): objects[id].ring.material_override.albedo_color = colors[e.team]
+		if not e.is_empty(): objects[id].ring.material_override.set_shader_parameter("team_color",colors[e.team])
 
 func create_entity(e: Dictionary):
 	var root = Node3D.new()
@@ -338,20 +292,15 @@ func create_entity(e: Dictionary):
 	var legs = []
 	paint(model,e.team,legs)
 	var ring = MeshInstance3D.new()
-	var torus = TorusMesh.new()
-	torus.inner_radius = e.radius+0.15
-	torus.outer_radius = e.radius+0.25
-	torus.rings = 24
-	torus.ring_segments = 6
-	ring.mesh = torus
-	ring.position.y = 0.12
-	ring.material_override = material(colors[e.team],true)
+	var plane = PlaneMesh.new()
+	plane.size = Vector2.ONE*2*(e.radius+0.9)
+	ring.mesh = plane; ring.position.y = 0.08
+	var ring_mat = ShaderMaterial.new(); ring_mat.shader = SelectionShader
+	ring_mat.set_shader_parameter("radius",e.radius)
+	ring_mat.set_shader_parameter("team_color",colors[e.team])
+	ring.material_override = ring_mat
+	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	root.add_child(ring)
-	var edge = MeshInstance3D.new(); var edge_mesh = TorusMesh.new()
-	edge_mesh.inner_radius = e.radius+0.12; edge_mesh.outer_radius = e.radius+0.28
-	edge_mesh.rings = 24; edge_mesh.ring_segments = 6
-	edge.mesh = edge_mesh; edge.material_override = material(Color("13221f"),true)
-	edge.scale.y = 0.35; edge.position.y = -0.03; ring.add_child(edge)
 	if e.kind == "building":
 		var badge = Label3D.new()
 		badge.name = "LevelBadge"
@@ -448,6 +397,7 @@ func refresh(dt: float):
 		o.model.rotation.z = sin(sim.time*7+e.id)*0.045 if Activity.harvesting(sim,e) and water_motion else 0.0
 		o.model.scale = Vector3.ONE*(0.25+0.75*e.progress)
 		o.ring.visible = selected.has(e.id)
+		if o.ring.visible: o.ring.material_override.set_shader_parameter("clock",sim.time if combat_motion else 0.0)
 		if e.kind == "building":
 			o.root.get_node("LevelBadge").text = "L%d" % e.level
 			o.root.get_node("LevelBadge").modulate = colors[e.team]
@@ -512,3 +462,17 @@ func refresh(dt: float):
 	while effects.size() > 64:
 		effects[0].node.queue_free()
 		effects.pop_front()
+
+func ground_texture() -> ImageTexture:
+	# Static colour texture: soft surface transitions and grain with no per-frame work.
+	var image = Image.create(256,256,false,Image.FORMAT_RGB8)
+	for y in range(256):
+		for x in range(256):
+			var p = Vector2(x+0.5,y+0.5)/256.0*(sim.nav.half*2)-Vector2.ONE*sim.nav.half
+			var color = surface(p)*0.4
+			for offset in [Vector2(-0.65,0),Vector2(0.65,0),Vector2(0,-0.65),Vector2(0,0.65)]: color += surface(p+offset)*0.15
+			var grain = (fposmod(sin(p.x*12.9898+p.y*78.233)*43758.5453,1.0)-0.5)*0.045
+			color = color.lightened(grain) if grain > 0 else color.darkened(-grain)
+			image.set_pixel(x,y,color)
+	image.generate_mipmaps()
+	return ImageTexture.create_from_image(image)
