@@ -14,6 +14,7 @@ func setup(level: int = 1) -> Dictionary:
 	sim.players[1].alloy=100;sim.players[1].energy=0
 	return {"sim":sim,"b":barracks}
 func _initialize():
+	check_commands()
 	for map in ["basin","expanse"]:
 		var sim = Simulation.new(false,true,map)
 		var x = -sim.nav.half+9
@@ -52,3 +53,38 @@ func _initialize():
 	check(sim.own(1).any(func(e): return e.type == "barracks" and not e.complete and e.p.distance_to(relocated.p)<24),"AI rebuilds beside surviving headquarters")
 	print("REVIEW: %d failures" % failures)
 	quit(1 if failures else 0)
+
+func check_commands():
+	var sim = Simulation.new(false,false,"classic")
+	sim.entities = sim.entities.filter(func(e): return e.kind == "building")
+	var unit = sim.spawn("ranger",0,Vector2(0,20))
+	var blocked = sim.spawn("worker",1,Vector2(6,20))
+	var clear = sim.spawn("worker",1,Vector2(0,26.3))
+	sim.spawn("barracks",0,Vector2(3,20))
+	sim.nav.rebuild(sim.entities); sim.update_vision()
+	sim.issue([unit.id],{"type":"attackmove","p":Vector2(20,20)})
+	sim.issue([unit.id],{"type":"move","p":Vector2(20,30)},true)
+	var before = clear.hp+clear.shield; var blocked_before = blocked.hp+blocked.shield
+	unit.stalled = 5.99; unit.move_sample = unit.p
+	sim.tick(0.05)
+	check(clear.hp+clear.shield < before and blocked.hp+blocked.shield == blocked_before,"attack-move prefers a clear shot over a screened enemy")
+	check(unit.p == Vector2(0,20) and unit.orders.size() == 2 and unit.stalled == 0,"engagement preserves the route and resets movement stall tracking")
+	before = clear.hp+clear.shield
+	sim.issue([unit.id],{"type":"move","p":Vector2(0,16)})
+	sim.tick(0.05)
+	check(unit.moving and clear.hp+clear.shield == before,"explicit Move still withdraws instead of auto-firing")
+	for map in ["classic","expanse"]:
+		for type in ["ranger","tank"]:
+			var edge_sim = Simulation.new(false,false,map)
+			var edge = edge_sim.nav.half
+			var traveler = edge_sim.spawn(type,0,Vector2(edge-10,edge-10))
+			var limit = edge-maxf(1,traveler.radius+0.1)
+			for command in ["move","attackmove"]:
+				edge_sim.issue([traveler.id],{"type":command,"p":Vector2(999,999)})
+				check(traveler.orders[0].p == Vector2(limit,limit),"single %s %s clamps to the %s boundary" % [type,command,map])
+			edge_sim.issue([traveler.id],{"type":"move","p":Vector2(999,999)})
+			for i in range(600):
+				if traveler.orders.is_empty(): break
+				edge_sim.tick(0.05)
+			check(traveler.orders.is_empty() and traveler.p.distance_to(Vector2(limit,limit)) < 2.2,"single %s reaches the %s corner" % [type,map])
+			check(not edge_sim.message.contains("cannot reach"),"corner movement finishes without a false blockage warning")

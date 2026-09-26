@@ -186,7 +186,7 @@ func issue(ids: Array,order: Dictionary,append: bool = false,team: int = 0):
 		if o.type in ["move","attackmove","patrol"] and units.size() > 1:
 			o.p += Vector2((i%side)-(side-1)*0.5,floori(float(i)/side)-(side-1)*0.5)*2.1
 			o.p = o.p.clamp(Vector2.ONE*(-nav.half+3),Vector2.ONE*(nav.half-3))
-		if o.type == "patrol":
+		if o.type in ["move","attackmove","patrol"]:
 			var limit = nav.half-maxf(1,e.radius+0.1)
 			o.p = o.p.clamp(Vector2.ONE*-limit,Vector2.ONE*limit)
 		if not append or o.type == "stop":
@@ -729,6 +729,15 @@ func tick(dt: float):
 			if e.type != "worker": fight(e,enemy(e,e.range,true),dt,false)
 			continue
 		var o = e.orders[0]
+		if o.type == "patrol" and o.origin == null: o.origin = e.p
+		# Prefer a clear shot already in weapon range before chasing a screened enemy.
+		# Explicit Move and Attack orders retain the player's chosen behavior.
+		if o.type in ["attackmove","patrol"] and e.type != "worker" and e.get("damage",0) > 0:
+			var nearby = enemy(e,e.range,true)
+			if not nearby.is_empty():
+				fight(e,nearby,dt,false)
+				reset_worker_route(e)
+				continue
 		if o.type in ["gather","deliver","build","repair"]: update_worker(e,o,dt)
 		elif o.type == "attack":
 			if not fight(e,entity(o.target),dt): finish(e)
@@ -736,12 +745,7 @@ func tick(dt: float):
 			var target = enemy(e,12)
 			if (target.is_empty() or not fight(e,target,dt)) and move(e,o.p,dt,1.1): finish(e)
 		elif o.type == "patrol":
-			if o.origin == null: o.origin = e.p
-			var target = enemy(e,e.range,true)
-			if not target.is_empty():
-				fight(e,target,dt,false)
-				reset_worker_route(e)
-			elif move(e,o.p,dt,1.1):
+			if move(e,o.p,dt,1.1):
 				# Yield at the next endpoint if another order was queued.
 				if e.orders.size() > 1: finish(e)
 				else:
