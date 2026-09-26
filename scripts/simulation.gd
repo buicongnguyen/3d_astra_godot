@@ -474,6 +474,7 @@ func enemy(e: Dictionary,radius: float,clear_shot: bool = false) -> Dictionary:
 func apply_damage(t: Dictionary,damage: float,team: int):
 	if t.hp <= 0: return
 	if not is_finite(damage) or damage <= 0: return
+	if t.get("training_guard",false): damage = minf(damage,maxf(0,t.hp+t.shield-1))
 	t.shield_delay = 5.0
 	var absorbed = minf(t.shield,damage)
 	t.shield -= absorbed

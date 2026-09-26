@@ -59,6 +59,10 @@ var modal_body: VBoxContainer
 var modal_title: Label
 var modal_desc: Label
 var modal_actions: VBoxContainer
+const Tutorial = preload("res://scripts/tutorial.gd")
+var tutorial
+var tutorial_shown = -1
+var training_controls: HBoxContainer
 const MAP_IDS = ["riverlands","classic","basin","expanse","dunes","woodlands","highlands"]
 var match_options = {}
 var campaign_stages = []
@@ -337,6 +341,11 @@ func make_ui():
 	objectives_copy = label("",14)
 	objectives_copy.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	objectives_popup.add_child(objectives_copy)
+	training_controls = HBoxContainer.new()
+	objectives_popup.add_child(training_controls)
+	training_controls.add_child(button("Focus target",func(): view.focus = tutorial.point(sim); objectives_popup.hide()))
+	training_controls.add_child(button("Leave training",func(): play_mode.select(0); restart_match()))
+	training_controls.hide()
 	overlay = Overlay.new()
 	overlay.game = self
 	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -376,7 +385,7 @@ func make_ui():
 	setup_box = VBoxContainer.new()
 	modal_body.add_child(setup_box)
 	modal_body.move_child(setup_box,2)
-	play_mode = setup_choice(["Skirmish","Campaign"])
+	play_mode = setup_choice(["Skirmish","Campaign","Training · start here"])
 	enemy_choice = setup_choice(["1 AI enemy","2 AI enemies","3 AI enemies"])
 	speed_choice = setup_choice(["Relaxed AI","Normal AI","Fast AI","Relentless AI"])
 	speed_choice.select(1)
@@ -453,10 +462,10 @@ func layout():
 	minimap_rect = Rect2(field_width-minimap_size-18,header.position.y+header.size.y+12,minimap_size,minimap_size)
 	objective.position = Vector2(18,header.position.y+header.size.y+12)
 	objective.size = Vector2(maxf(100,field_width-minimap_size-60),55)
-	objective.visible = not narrow
+	objective.visible = not narrow and tutorial == null
 	objectives_button.position = Vector2(18,header.position.y+header.size.y+12)
 	objectives_button.size = Vector2(112,44)
-	objectives_button.visible = narrow and started and not paused and sim.result == ""
+	objectives_button.visible = (narrow or tutorial != null) and started and not paused and sim.result == ""
 	objectives_popup.position = objectives_button.position+Vector2(0,48)
 	objectives_popup.size = Vector2(minf(300,field_width-36),120)
 	objectives_copy.position = Vector2(12,10)
@@ -514,6 +523,7 @@ func show_briefing():
 	refresh_setup()
 	modal_title.text = "FRONTIER COMMAND"
 	modal_desc.text = "MERIDIAN EXPEDITION · GODOT EDITION\n\nBuild an outpost. Command a mixed army. Cross the river and destroy the enemy Command core.\n\nDesktop: drag to select · right-click orders\nWASD pan · wheel zoom · F attack-move · B build · ? shortcuts\nTouch: tap select/order · drag pan · pinch zoom"
+	if play_mode.selected == 2: refresh_setup()
 	clear_children(modal_actions)
 	modal_actions.add_child(button("Start",start_match))
 	modal_actions.add_child(button("Army & graphics settings",show_settings))
@@ -526,16 +536,22 @@ func start_match():
 		if campaign_index > 0 and not campaign_progress.has(campaign_stages[campaign_index-1].id): return
 		match_options = campaign_stages[campaign_index].duplicate(true)
 		stage_id = match_options.map
+	if play_mode.selected == 2:
+		stage_id = "classic"; match_options = {"enemies":1,"speed":"relaxed","alliance":"ffa"}
 	reset_sim(stage_id == "riverlands",stage_id)
 	started = true
 	paused = false
 	modal.visible = false
 	scrim.visible = false
 	selected = sim.own(0).filter(func(e): return e.type == "worker").map(func(e): return e.id)
+	if play_mode.selected == 2:
+		tutorial = Tutorial.new(sim); tutorial_shown = -1; selected.clear()
 	action_signature = ""
+	layout()
 	acknowledge()
 
 func reset_sim(river: bool, stage_id: String = ""):
+	tutorial = null
 	if is_instance_valid(objectives_popup): objectives_popup.hide()
 	test_manual_clock = false
 	test_visual_freeze = false
@@ -943,7 +959,8 @@ func refresh_ui():
 	var army_size = sim.own(0).filter(func(e): return e.kind == "unit" and e.type != "worker").size()
 	objective.text = "Tech %d / 3 · " % sim.tech_level(0)+("1 / 4  Assign workers to alloy and energy" if not harvest else ("2 / 4  Construct a Supply relay" if not supply else ("3 / 4  Train an army of eight" if army_size < 8 else "4 / 4  Destroy the enemy Command core")))+"\nIdle workers: "+str(idle.size())
 	objectives_copy.text = objective.text
-	objectives_button.visible = mobile_layout and started and not paused and sim.result == ""
+	refresh_training()
+	objectives_button.visible = (mobile_layout or tutorial != null) and started and not paused and sim.result == ""
 	if not objectives_button.visible: objectives_popup.hide()
 	for e in sim.entities:
 		if e.team > 0 and e.kind == "building" and sim.seen(e.p): known_buildings[e.id] = {"p":e.p,"type":e.type,"team":e.team}
@@ -1119,7 +1136,9 @@ func _process(dt):
 		if not (test_enabled and test_manual_clock):
 			accumulator += minf(dt,0.2)
 			while accumulator >= 0.05:
+				if tutorial: tutorial.update(sim,selected)
 				sim.tick(0.05)
+				if tutorial: tutorial.update(sim,selected)
 				accumulator -= 0.05
 		var pan = Vector2(float(Input.is_key_pressed(KEY_D) or Input.is_key_pressed(KEY_RIGHT))-float(Input.is_key_pressed(KEY_A) or Input.is_key_pressed(KEY_LEFT)),float(Input.is_key_pressed(KEY_S) or Input.is_key_pressed(KEY_DOWN))-float(Input.is_key_pressed(KEY_W) or Input.is_key_pressed(KEY_UP)))
 		if not Input.is_key_pressed(KEY_CTRL) and not Input.is_key_pressed(KEY_ALT) and not Input.is_key_pressed(KEY_META): view.focus += pan*view.zoom*0.65*dt
@@ -1141,6 +1160,7 @@ func _process(dt):
 		modal.visible = true
 		scrim.visible = true
 		scenario.visible = false
+		setup_box.hide()
 		if sim.result == "victory" and campaign_index >= 0:
 			var id = campaign_stages[campaign_index].id
 			campaign_progress[id] = minf(campaign_progress.get(id,INF),sim.time)
@@ -1153,6 +1173,32 @@ func _process(dt):
 		modal_actions.add_child(button("New game / choose map",restart_match))
 		if sim.result == "victory" and campaign_index >= 0 and campaign_index+1 < campaign_stages.size():
 			modal_actions.add_child(button("Next stage",func(): campaign_choice.select(campaign_index+1); start_match()))
+		if tutorial:
+			modal_title.text = "TRAINING COMPLETE" if tutorial.done else "TRAINING ENDED"
+			modal_desc.text = "You practiced selection, economy, construction, production, attack and withdrawal. Campaign introduces an active opponent."
+			clear_children(modal_actions)
+			modal_actions.add_child(button("Campaign menu",func(): play_mode.select(1); restart_match()))
+			modal_actions.add_child(button("Replay training",start_match))
+			modal_actions.add_child(button("Choose a game",restart_match))
+			if tutorial.done:
+				var saved = ConfigFile.new(); saved.set_value("training","completed",true); saved.save("user://training.cfg")
+
+func refresh_training():
+	var active = tutorial != null and started and not tutorial.done and sim.result == ""
+	training_controls.visible = active
+	objectives_button.text = "Training %d/8" % (tutorial.index+1) if active else "Objectives"
+	if not active:
+		objectives_copy.add_theme_font_size_override("font_size",14)
+		return
+	objective.hide()
+	objectives_popup.size = Vector2(minf(320,ui.size.x-36),140)
+	objectives_copy.size = Vector2(objectives_popup.size.x-24,90)
+	objectives_copy.add_theme_font_size_override("font_size",13)
+	objectives_copy.text = tutorial.steps[tutorial.index].title+"\n"+tutorial.steps[tutorial.index]["touch" if touch_device else "desktop"]+"\nTraining supplies replenish."
+	training_controls.position = Vector2(12,94)
+	objectives_popup.position.y = objectives_button.position.y+44
+	if tutorial_shown != tutorial.index:
+		tutorial_shown = tutorial.index; objectives_popup.show()
 
 func setup_choice(items: Array) -> OptionButton:
 	var choice = OptionButton.new()
@@ -1165,13 +1211,15 @@ func setup_choice(items: Array) -> OptionButton:
 
 func refresh_setup():
 	var campaign = play_mode.selected == 1
-	scenario.visible = not campaign
-	enemy_choice.visible = not campaign
-	speed_choice.visible = not campaign
-	alliance_choice.visible = not campaign
+	var training = play_mode.selected == 2
+	scenario.visible = not campaign and not training
+	enemy_choice.visible = not campaign and not training
+	speed_choice.visible = not campaign and not training
+	alliance_choice.visible = not campaign and not training
 	campaign_choice.visible = campaign
 	if campaign: modal_desc.text = campaign_stages[campaign_choice.selected].story
 	else: modal_desc.text = "Choose a map, enemy count and AI speed. Free for all: rivals fight each other. Coalition: rivals share vision and attack together.\n\nRight-click orders · drag select · WASD pan · wheel zoom · ? shortcuts"
+	if training: modal_desc.text = "Learn selection, movement, harvesting, building, production, attacking and withdrawal. Eight guided steps, replenished training supplies, no AI attacks. Leave or replay anytime."
 	for i in range(campaign_stages.size()): campaign_choice.set_item_disabled(i,i > 0 and not campaign_progress.has(campaign_stages[i-1].id))
 
 func test_call(args):
@@ -1187,7 +1235,10 @@ func test_call(args):
 			test_manual_clock = command.get("manual_clock",false) == true
 			accumulator = 0
 		"step":
-			for i in range(mini(12000,int(command.get("seconds",1)*20))): sim.tick(0.05)
+			for i in range(mini(12000,int(command.get("seconds",1)*20))):
+				if tutorial: tutorial.update(sim,selected)
+				sim.tick(0.05)
+				if tutorial: tutorial.update(sim,selected)
 		"select": selected = command.ids
 		"order":
 			var o = command.order
@@ -1339,6 +1390,7 @@ func publish_state():
 	state.ai_speed = sim.ai_speed
 	state.coalition = sim.coalition
 	state.campaign_index = campaign_index
+	state.training = {"index":tutorial.index,"done":tutorial.done,"target":tutorial.target_id} if tutorial else null
 	state.map_id = sim.map_id
 	state.map_size = sim.nav.half*2
 	state.building_probes = sim.own(0).filter(func(e): return e.kind == "building").map(func(e):

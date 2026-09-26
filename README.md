@@ -8,6 +8,8 @@ An original 3D single-player RTS built in **Godot 4.7.2 / GDScript**, with origi
 
 ## Play
 
+Choose **Training · start here** in the game-mode menu for eight guided lessons in selection, movement, harvesting, construction, production, attack and withdrawal. **Focus target** centers the camera and folds the instructions; **Leave training** returns to setup. Training has no AI attacks and replenishes supplies. See the [training implementation plan](docs/TUTORIAL_IMPLEMENTATION_PLAN.md).
+
 Soldiers and tanks can **Patrol (P)** between two points. Harvesters have an explicit **Attack (N)** command. See [Patrol and Harvester Attack](docs/PATROL_AND_ATTACK.md) for mouse, touch and order-queue behavior.
 
 Choose Meridian Riverlands or Ashen Frontier, customize army colors if desired, and deploy. Assign Harvesters to alloy and energy, build supply, train a mixed army, then destroy the enemy Command core.

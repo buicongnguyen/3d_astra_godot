@@ -32,6 +32,11 @@ func _draw():
 		var end = project(building.rally,0.3)
 		draw_line(start,end,Color(0.5,0.9,0.7,0.5),1.5)
 		draw_arc(end,9,0,TAU,20,Color("92ebc5"),2)
+	if game.tutorial and not game.tutorial.done and game.started:
+		var marker = project(game.tutorial.point(game.sim),0.2)
+		if feedback_visible(Rect2(marker-Vector2.ONE*18,Vector2.ONE*36)):
+			draw_arc(marker,16,0,TAU,24,Color("ffe079"),2)
+			draw_circle(marker,3,Color("ffe079"))
 	draw_activity()
 	if game.dragging and not game.touch_active and game.mode == "":
 		var rect = Rect2(game.pointer_start,game.pointer_now-game.pointer_start).abs()

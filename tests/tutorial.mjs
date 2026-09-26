@@ -1,0 +1,10 @@
+import {chromium} from 'playwright';import assert from 'node:assert/strict';import fs from 'node:fs';
+const browser=await chromium.launch({headless:true,executablePath:process.platform==='win32'?'C:/Program Files/Google/Chrome/Application/chrome.exe':undefined,args:['--enable-unsafe-swiftshader']});fs.mkdirSync('test-results',{recursive:true});
+try{for(const [width,height] of [[1280,800],[320,568],[844,390]]){
+ const mobile=width!==1280,page=await browser.newPage({viewport:{width,height},isMobile:mobile,hasTouch:mobile}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
+ const state=()=>page.evaluate(()=>window.frontierState);
+ const click=async text=>{await page.waitForFunction(t=>window.frontierState.buttons.some(b=>b.text===t),text);const b=(await state()).buttons.find(b=>b.text===text);assert.ok(b.x>=0&&b.y>=0&&b.x+b.w<=width+1&&b.y+b.h<=height+1,text+' fits');await page.mouse.click(b.x+b.w/2,b.y+b.h/2);return b;};
+ await page.goto((process.env.TEST_URL||'http://127.0.0.1:4176/3d_astra_godot/')+'?test=1');await page.waitForFunction(()=>window.frontierState?.ready,null,{timeout:90000});await page.waitForFunction(w=>window.frontierState.viewport[0]===w,width);
+ const choice=await click('Skirmish');await page.waitForTimeout(250);await page.mouse.click(choice.x+choice.w/2,choice.y+choice.h+3+26*2.5);await click('Start');await page.waitForFunction(()=>window.frontierState.training?.index===0);await click('Focus target');
+ await page.waitForTimeout(300);const worker=(await state()).entities.find(e=>e.team===0&&e.type==='worker');if(mobile)await page.touchscreen.tap(...worker.screen);else await page.mouse.click(...worker.screen);await page.waitForFunction(()=>window.frontierState.training.index===1);await page.screenshot({path:`test-results/tutorial-${width}.png`});await click('Leave training');await page.waitForFunction(()=>window.frontierState.training===null&&!window.frontierState.started);assert.deepEqual(errors,[]);console.log(`Godot tutorial entry, selection and exit passed ${width}x${height}`);await page.close();
+}}finally{await browser.close();}
