@@ -24,7 +24,7 @@ func _draw():
 	draw_texture_rect(menu_icon,Rect2(7,(size.y-22)/2,22,22),false,tint)
 	var font = get_theme_font("font")
 	var baseline = (size.y-font.get_height(12))/2+font.get_ascent(12) if price.is_empty() else 18.0
-	draw_string(font,Vector2(35,baseline),caption,HORIZONTAL_ALIGNMENT_LEFT,size.x-41-key_space,12,Color("e5f2ec")*tint)
+	draw_string(font,Vector2(35,baseline),tr(caption),HORIZONTAL_ALIGNMENT_LEFT,size.x-41-key_space,12,Color("e5f2ec")*tint)
 	if not price.is_empty():
 		var pen = 35.0
 		for i in range(2):

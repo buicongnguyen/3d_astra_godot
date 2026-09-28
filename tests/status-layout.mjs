@@ -12,7 +12,7 @@ try{
   await page.goto((process.env.TEST_URL||'http://127.0.0.1:4176/3d_astra_godot/')+'?test=1');
   await page.waitForFunction(()=>window.frontierState?.ready,null,{timeout:90000});
   await cmd({action:'stage',index:1});await cmd({action:'start',manual_clock:true});
-  for(const viewport of mobile?[{width:320,height:568},{width:390,height:844},{width:667,height:375},{width:844,height:390},{width:768,height:1024}]:[{width:1280,height:800},{width:1024,height:768}]){
+  for(const viewport of mobile?[{width:320,height:568},{width:390,height:844},{width:667,height:375},{width:844,height:390},{width:768,height:1024}]:[{width:1920,height:1080},{width:1280,height:800},{width:1024,height:768}]){
    await cmd({action:'restart'});await cmd({action:'start',manual_clock:true});
    await page.setViewportSize(viewport);await page.waitForFunction(v=>frontierState.viewport[0]===v.width&&frontierState.viewport[1]===v.height,viewport);
    let initial=await state();const core=initial.entities.find(e=>e.type==='hq'&&e.team===0);
@@ -32,6 +32,11 @@ try{
     assert.deepEqual(s.stat_icons.slice(0,3),['health','shield','crosshair'],'selected stats have consistent icons');
     assert.ok(s.action_buttons.every(b=>b.icon&&b.caption_fits&&b.h>=44),'command icons and complete labels fit tap targets: '+JSON.stringify(s.action_buttons));
     assert.ok(r[1]+r[3]<=a[1]||r[0]+r[2]<=a[0],'stats do not overlap commands');
+    if(!mobile){
+     const dock=s.bottom_rect;
+     assert.ok(dock[2]<=936&&dock[3]<=170&&Math.abs(dock[0]+dock[2]/2-viewport.width/2)<=1,'desktop dock stays compact and centered');
+     assert.ok(s.action_buttons.every(b=>b.x>=a[0]&&b.x+b.w<=a[0]+a[2]+1&&b.y>=a[1]&&b.y+b.h<=a[1]+a[3]+1),'all desktop commands fit without scrolling: '+JSON.stringify(s.action_buttons));
+    }
     if(mobile){
      assert.ok(s.action_buttons.every(b=>b.x>=a[0]&&b.x+b.w<=a[0]+a[2]+1&&b.y>=a[1]&&b.y+b.h<=a[1]+a[3]+1),JSON.stringify({a,buttons:s.action_buttons}));
      if(s.action_buttons.length>=2)assert.ok(s.action_buttons[0].y===s.action_buttons[1].y&&s.action_buttons[0].x+s.action_buttons[0].w<s.action_buttons[1].x,'two separate command tiles per row');

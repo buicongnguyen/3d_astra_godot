@@ -7,6 +7,9 @@ const WorkButton = preload("res://scripts/work_button.gd")
 const WorkActivity = preload("res://scripts/activity.gd")
 const Icons = preload("res://scripts/ui_icons.gd")
 const CommandTile = preload("res://scripts/menu_button.gd")
+const LanguageTranslation = preload("res://scripts/language_translation.gd")
+var vietnamese_translation
+var language_choice: HBoxContainer
 const StatCell = preload("res://scripts/stat_cell.gd")
 const PALETTES = ["Mint","Coral","Blue","Gold","Violet","Cyan","Orange","Ivory"]
 const HEXES = ["92ebc5","ef7660","689dff","edc76f","b397ee","64d9ed","efa34f","ebe7cd"]
@@ -76,7 +79,7 @@ var alliance_choice: OptionButton
 var campaign_choice: OptionButton
 var scenario: OptionButton
 var action_signature = ""
-var settings = {"player":0,"enemy":1,"eco":false,"water":true,"combat":true,"detail":true,"muted":false}
+var settings = {"language":"en","player":0,"enemy":1,"eco":false,"water":true,"combat":true,"detail":true,"muted":false}
 var test_callback
 var test_enabled = false
 var beep: AudioStreamPlayer
@@ -142,6 +145,9 @@ document.getElementById('canvas').addEventListener('mousedown', event => {
 	touch_device = bool(JavaScriptBridge.eval("matchMedia('(pointer: coarse)').matches")) if OS.has_feature("web") else DisplayServer.is_touchscreen_available()
 	settings.eco = touch_device
 	load_settings()
+	vietnamese_translation = LanguageTranslation.new()
+	TranslationServer.add_translation(vietnamese_translation)
+	TranslationServer.set_locale(settings.language)
 	sim = Simulation.new()
 	view = WorldView.new()
 	add_child(view)
@@ -158,6 +164,9 @@ document.getElementById('canvas').addEventListener('mousedown', event => {
 		if test_enabled:
 			test_callback = JavaScriptBridge.create_callback(test_call)
 			JavaScriptBridge.get_interface("window").frontierCommand = test_callback
+
+func _exit_tree():
+	if vietnamese_translation != null: TranslationServer.remove_translation(vietnamese_translation)
 
 func make_audio():
 	beep = AudioStreamPlayer.new()
@@ -180,11 +189,20 @@ func load_settings():
 	for key in settings:
 		var value = config.get_value("settings",key,settings[key])
 		if typeof(value) == typeof(settings[key]): settings[key] = value
+	if not settings.language in ["en","vi"]: settings.language = "en"
 	settings.player = clampi(settings.player,0,HEXES.size()-1)
 	settings.enemy = clampi(settings.enemy,0,HEXES.size()-1)
 	if settings.enemy == settings.player: settings.enemy = (settings.player+1)%HEXES.size()
 
 func apply_settings():
+	if not settings.language in ["en","vi"]: settings.language = "en"
+	TranslationServer.set_locale(settings.language)
+	if is_instance_valid(language_choice):
+		for choice in language_choice.get_children():
+			choice.set_pressed_no_signal(choice.get_meta("language") == settings.language)
+	if OS.has_feature("web"): JavaScriptBridge.eval("document.documentElement.lang = \""+settings.language+"\"")
+	if is_instance_valid(actions):
+		for child in actions.get_children(): child.queue_redraw()
 	view.set_colors(Color(HEXES[settings.player]),Color(HEXES[settings.enemy]))
 	var reduced_motion = bool(JavaScriptBridge.eval("matchMedia('(prefers-reduced-motion: reduce)').matches")) if OS.has_feature("web") else false
 	view.water_motion = settings.water and not reduced_motion
@@ -385,6 +403,13 @@ func make_ui():
 	setup_box = VBoxContainer.new()
 	modal_body.add_child(setup_box)
 	modal_body.move_child(setup_box,2)
+	setup_box.add_child(label("Language / Ngôn ngữ",13))
+	language_choice = make_language_buttons(settings.language,func(code):
+		settings.language = code
+		apply_settings()
+		layout.call_deferred()
+	)
+	setup_box.add_child(language_choice)
 	play_mode = setup_choice(["Skirmish","Campaign","Training · start here"])
 	enemy_choice = setup_choice(["1 AI enemy","2 AI enemies","3 AI enemies"])
 	speed_choice = setup_choice(["Relaxed AI","Normal AI","Fast AI","Relentless AI"])
@@ -425,14 +450,17 @@ func layout():
 	# Widen zoom hit targets while retaining enough room for all five header buttons.
 	for nav_button in nav_buttons.get_children():
 		nav_button.custom_minimum_size.x = 44 if narrow else 0
+		nav_button.add_theme_font_size_override("font_size",12 if narrow else 14)
 		for state_name in ["normal","hover","pressed","focus"]:
 			var style = ui.theme.get_stylebox(state_name,"Button").duplicate()
 			style.content_margin_left = 8 if narrow else 12
 			style.content_margin_right = 8 if narrow else 12
 			nav_button.add_theme_stylebox_override(state_name,style)
 	var height = 250 if narrow else 170
-	bottom.position = Vector2(10,size.y-height-10)
-	bottom.size = Vector2(size.x-20,height)
+	# Four action columns fit the largest worker/group menu without hiding commands.
+	var dock_width = size.x-20 if narrow else minf(936,size.x-20)
+	bottom.position = Vector2((size.x-dock_width)*0.5,size.y-height-10)
+	bottom.size = Vector2(dock_width,height)
 	if landscape_layout:
 		bottom.position = Vector2(size.x-290,10)
 		bottom.size = Vector2(280,size.y-20)
@@ -597,6 +625,19 @@ func toggle_pause():
 		modal_actions.add_child(button("Army & graphics settings",show_settings))
 		modal_actions.add_child(button("New game / choose map",restart_match))
 
+func make_language_buttons(current: String,callback: Callable) -> HBoxContainer:
+	var row = HBoxContainer.new()
+	var group = ButtonGroup.new()
+	for code in ["en","vi"]:
+		var choice = button("English" if code == "en" else "Tiếng Việt",func(): callback.call(code))
+		choice.toggle_mode = true
+		choice.button_group = group
+		choice.set_pressed_no_signal(code == current)
+		choice.set_meta("language",code)
+		choice.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(choice)
+	return row
+
 func show_settings():
 	if is_instance_valid(settings_panel): return
 	modal.visible = false
@@ -610,6 +651,9 @@ func show_settings():
 	body.add_theme_constant_override("separation",10)
 	scroll.add_child(body)
 	body.add_child(label("EXPEDITION SETTINGS",22))
+	body.add_child(label("Language / Ngôn ngữ",14))
+	var language_draft = {"value":settings.language}
+	body.add_child(make_language_buttons(settings.language,func(code): language_draft.value = code))
 	body.add_child(label("Choose distinct colors for both armies.",14))
 	var picks = []
 	for key in ["player","enemy"]:
@@ -637,6 +681,7 @@ func show_settings():
 		if picks[0].selected == picks[1].selected:
 			error.text = "Choose different army colors."
 			return
+		settings.language = language_draft.value
 		settings.player = picks[0].selected
 		settings.enemy = picks[1].selected
 		for key in toggles: settings[key] = toggles[key].button_pressed
@@ -1365,6 +1410,9 @@ func publish_state():
 	state.groups = groups
 	state.notice = notice.text
 	state.selection_info = " · ".join(stat_labels.filter(func(l): return l.visible).map(func(l): return l.text.replace("\n"," ")))+" · "+info_label.text if stat_row.visible else info_label.text
+	state.language = settings.language
+	state.display_notice = notice.tr(notice.text)
+	state.display_selection = selection_label.tr(selection_label.text)
 	state.selection_status = info_label.text
 	state.stat_cells = stat_labels.filter(func(l): return l.is_visible_in_tree()).map(func(l): return {"text":l.text,"x":l.global_position.x,"y":l.global_position.y,"w":l.size.x,"h":l.size.y,"lines":l.get_line_count(),"text_width":l.get_theme_font("font").get_string_size(l.text.get_slice("\n",1),HORIZONTAL_ALIGNMENT_LEFT,-1,l.get_theme_font_size("font_size")).x})
 	state.stat_icons = stat_labels.filter(func(l): return l.is_visible_in_tree()).map(func(l): return l.icon_key)
@@ -1381,6 +1429,7 @@ func publish_state():
 	collect_buttons(actions,state.action_buttons)
 	state.queue_buttons = []
 	collect_buttons(queue_strip,state.queue_buttons)
+	state.bottom_rect = [bottom.global_position.x,bottom.global_position.y,bottom.size.x,bottom.size.y]
 	state.action_rect = [action_scroll.global_position.x,action_scroll.global_position.y,action_scroll.size.x,action_scroll.size.y]
 	state.ui_action_serial = ui_action_serial
 	state.minimap_rect = [minimap_rect.position.x,minimap_rect.position.y,minimap_rect.size.x,minimap_rect.size.y]
@@ -1409,11 +1458,11 @@ func publish_state():
 func collect_buttons(node: Node,list: Array):
 	if node is Button and node.is_visible_in_tree():
 		var rect = node.get_global_rect()
-		list.append({"text":node.get_meta("command_label",node.text),"display_text":node.text,"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
+		list.append({"text":node.get_meta("command_label",node.text),"display_text":node.tr(node.text),"x":rect.position.x,"y":rect.position.y,"w":rect.size.x,"h":rect.size.y,"disabled":node.disabled})
 		if node is CommandTile:
 			list[-1].icon = node.icon_key
-			list[-1].caption = node.caption
-			list[-1].caption_fits = node.get_theme_font("font").get_string_size(node.caption,HORIZONTAL_ALIGNMENT_LEFT,-1,12).x <= node.size.x-41-node.key_space
+			list[-1].caption = node.tr(node.caption)
+			list[-1].caption_fits = node.get_theme_font("font").get_string_size(node.tr(node.caption),HORIZONTAL_ALIGNMENT_LEFT,-1,12).x <= node.size.x-41-node.key_space
 		if node is WorkButton:
 			list[-1].work_progress = node.progress
 			list[-1].work_glyph = node.glyph

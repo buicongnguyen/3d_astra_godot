@@ -45,6 +45,7 @@ jobs:
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/parity_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/visual_port_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/tutorial_test.gd
+          Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/language_test.gd
       - name: Export Web and Windows
         run: |
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --export-release Web
@@ -73,6 +74,8 @@ jobs:
         include:
           - name: desktop
             scripts: browser
+          - name: languages
+            scripts: language
           - name: training
             scripts: tutorial
           - name: hotkeys
