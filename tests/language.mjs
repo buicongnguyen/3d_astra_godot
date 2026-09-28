@@ -21,7 +21,30 @@ try{
   await page.waitForFunction(()=>frontierState.language==='vi');
   assert.equal((await state()).buttons.find(b=>b.text==='Start').display_text,'Bắt đầu');
   await page.screenshot({path:'test-results/language-start-'+(mobile?'mobile':'desktop')+'.png'});
-  await page.waitForTimeout(1100);await page.reload();
+  // Godot persists user:// asynchronously; observe the saved record before reloading.
+  await page.waitForFunction(async()=>{
+   if(!(await indexedDB.databases()).some(db=>db.name==='/userfs'))return false;
+   return new Promise(resolve=>{
+    const request=indexedDB.open('/userfs');
+    request.onerror=()=>resolve(false);
+    request.onsuccess=()=>{
+     const db=request.result;
+     if(!db.objectStoreNames.contains('FILE_DATA')){db.close();resolve(false);return;}
+     const tx=db.transaction('FILE_DATA','readonly'),store=tx.objectStore('FILE_DATA');
+     const cursor=store.openCursor();let saved=false;
+     cursor.onsuccess=()=>{
+      const row=cursor.result;
+      if(!row)return;
+      if(String(row.key).endsWith('/preferences.cfg')&&row.value.contents)
+       saved=/language\s*=\s*"vi"/.test(new TextDecoder().decode(row.value.contents));
+      row.continue();
+     };
+     tx.oncomplete=()=>{db.close();resolve(saved);};
+     tx.onerror=()=>{db.close();resolve(false);};
+    };
+   });
+  },null,{timeout:45000,polling:250});
+  await page.reload();
   await page.waitForFunction(()=>window.frontierState?.language==='vi',null,{timeout:90000});
   await cmd({action:'start',manual_clock:true});
   await cmd({action:'activity_setup'});
