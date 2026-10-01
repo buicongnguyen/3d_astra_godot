@@ -16,7 +16,8 @@
     "test:visual-combat": "node tests/visual-combat.mjs",
     "test:new-game": "node tests/new-game.mjs",
     "test:tutorial": "node tests/tutorial.mjs",
-    "test:language": "node tests/language.mjs"
+    "test:language": "node tests/language.mjs",
+    "test:life": "node tests/life.mjs"
   },
   "devDependencies": {
     "playwright": "1.58.2"

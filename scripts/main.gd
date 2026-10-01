@@ -8,6 +8,7 @@ const WorkActivity = preload("res://scripts/activity.gd")
 const Icons = preload("res://scripts/ui_icons.gd")
 const CommandTile = preload("res://scripts/menu_button.gd")
 const LanguageTranslation = preload("res://scripts/language_translation.gd")
+const Governor = preload("res://scripts/governor.gd")
 var vietnamese_translation
 var language_choice: HBoxContainer
 const StatCell = preload("res://scripts/stat_cell.gd")
@@ -82,6 +83,9 @@ var action_signature = ""
 var settings = {"language":"en","player":0,"enemy":1,"eco":false,"water":true,"combat":true,"detail":true,"muted":false}
 var test_callback
 var test_enabled = false
+# Slow devices give up cosmetic motion (ambient life, water) to keep play smooth. Browser tests
+# keep it off and drive it with the "governor" test command.
+var governor = Governor.new()
 var beep: AudioStreamPlayer
 var last_key = ""
 var objective: Label
@@ -152,6 +156,7 @@ document.getElementById('canvas').addEventListener('mousedown', event => {
 	view = WorldView.new()
 	add_child(view)
 	view.setup(sim)
+	governor.changed.connect(func(level): view.set_motion_level(level))
 	make_ui()
 	make_audio()
 	apply_settings()
@@ -207,7 +212,10 @@ func apply_settings():
 	var reduced_motion = bool(JavaScriptBridge.eval("matchMedia('(prefers-reduced-motion: reduce)').matches")) if OS.has_feature("web") else false
 	view.water_motion = settings.water and not reduced_motion
 	view.combat_motion = settings.combat and not reduced_motion
+	view.reduced_motion = reduced_motion
+	view.set_life_budget(0.6 if settings.eco else 1.0)
 	view.decorative.visible = settings.detail
+	view.set_life_shown(settings.detail)
 	for child in view.get_children():
 		if child is DirectionalLight3D: child.shadow_enabled = not settings.eco
 	var config = ConfigFile.new()
@@ -569,6 +577,7 @@ func start_match():
 	reset_sim(stage_id == "riverlands",stage_id)
 	started = true
 	paused = false
+	governor.reset()
 	modal.visible = false
 	scrim.visible = false
 	selected = sim.own(0).filter(func(e): return e.type == "worker").map(func(e): return e.id)
@@ -1189,6 +1198,7 @@ func _process(dt):
 		if not Input.is_key_pressed(KEY_CTRL) and not Input.is_key_pressed(KEY_ALT) and not Input.is_key_pressed(KEY_META): view.focus += pan*view.zoom*0.65*dt
 	view.selected = selected
 	view.refresh(dt if not paused and not (test_enabled and test_visual_freeze) else 0.0)
+	if not test_enabled: governor.sample(dt,started and not paused and sim.result == "")
 	view.ghost.visible = mode == "build" and not paused
 	if view.ghost.visible:
 		view.ghost.position = Vector3(placement_point.x,0.18,placement_point.y)
@@ -1336,6 +1346,13 @@ func test_call(args):
 				sim.events.append({"type":"shot","p":a.p,"to":b.p,"team":a.team,"source":a.id,"weapon":a.type})
 		"visual_advance": view.refresh(float(command.get("seconds",0)))
 		"visual_fog": sim.visible[0].fill(0 if command.get("hidden",false) else 1)
+		"governor":
+			# Synthetic frame timings: {"seconds": s, "ms": frame time}; "reset" restarts the grace.
+			if command.get("reset",false): governor.reset(); governor.set_level(2)
+			var ms = float(command.get("ms",16.0))
+			var t = 0.0
+			while t < float(command.get("seconds",0.0)) - 1e-6:
+				governor.sample(ms/1000.0,true); t += ms/1000.0
 		"visual_settings": settings.water = false; settings.combat = command.get("motion",true); apply_settings()
 		"combat_setup":
 			for e in sim.entities: e.orders.clear()
@@ -1447,6 +1464,7 @@ func publish_state():
 		return {"id":e.id,"screen":[point.x,point.y]}
 	)
 	state.draw_calls = Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
+	state.life = {"families":view.life.families.map(func(n): return str(n.name).trim_prefix("life_")) if view.life else [],"level":view.motion_level,"clock":view.life.clock if view.life else 0.0,"governor":governor.level}
 	state.activity = overlay.activity_snapshot
 	state.activity_effects = view.activity_effects.size()
 	state.activity_effect_lives = view.activity_effects.map(func(e): return e.life)

@@ -46,6 +46,7 @@ jobs:
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/visual_port_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/tutorial_test.gd
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/language_test.gd
+          Godot_v4.7.2-stable_linux.x86_64 --headless --path . --script res://tests/life_test.gd
       - name: Export Web and Windows
         run: |
           Godot_v4.7.2-stable_linux.x86_64 --headless --path . --export-release Web
@@ -91,7 +92,7 @@ jobs:
           - name: activity
             scripts: activity
           - name: visuals
-            scripts: visual-combat status-layout
+            scripts: visual-combat status-layout life
     name: Browser checks (${{ matrix.name }})
     steps:
       - uses: actions/checkout@v7.0.1

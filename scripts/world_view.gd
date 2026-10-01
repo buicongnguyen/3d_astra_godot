@@ -1,6 +1,7 @@
 extends Node3D
 const Catalog = preload("res://scripts/catalog.gd")
 const Scenery = preload("res://scripts/scenery.gd")
+const AmbientLife = preload("res://scripts/ambient_life.gd")
 const SelectionShader = preload("res://shaders/selection.gdshader")
 var scenery_library: Node3D
 const Activity = preload("res://scripts/activity.gd")
@@ -17,8 +18,17 @@ var colors: Array = [Color("92ebc5"),Color("ef7660")]
 var terrain: Node3D
 var effects: Array = []
 var activity_effects: Array = []
+# Fog of war: the simulation's visible and explored bytes upload as two R8 textures (no
+# per-cell loop); shaders blend them into 0 visible, 0.6 explored, 0.94 unexplored.
 var fog_texture: ImageTexture
 var fog_image: Image
+var explored_texture: ImageTexture
+var explored_image: Image
+var life
+var life_budget = 1.0
+var life_shown = true
+var motion_level = 2
+var reduced_motion = false
 var fog_clock = 0.0
 var water_material: ShaderMaterial
 var decorative: Node3D
@@ -234,8 +244,10 @@ func build_map():
 	for side in [-1,1]:
 		box(boundary,Vector3(side*(sim.nav.half-0.04),0.025,0),Vector3(0.06,0.015,sim.nav.half*2),Color("8a8d70"))
 		box(boundary,Vector3(0,0.025,side*(sim.nav.half-0.04)),Vector3(sim.nav.half*2,0.015,0.06),Color("8a8d70"))
-	fog_image = Image.create(sim.nav.grid_size,sim.nav.grid_size,false,Image.FORMAT_RGBA8)
+	fog_image = Image.create_from_data(sim.nav.grid_size,sim.nav.grid_size,false,Image.FORMAT_R8,sim.visible[0])
 	fog_texture = ImageTexture.create_from_image(fog_image)
+	explored_image = Image.create_from_data(sim.nav.grid_size,sim.nav.grid_size,false,Image.FORMAT_R8,sim.explored[0])
+	explored_texture = ImageTexture.create_from_image(explored_image)
 	var fog = MeshInstance3D.new()
 	var fog_mesh = PlaneMesh.new()
 	fog_mesh.size = Vector2.ONE*sim.nav.half*2
@@ -243,13 +255,40 @@ func build_map():
 	fog.position.y = 0.65
 	var fog_mat = ShaderMaterial.new()
 	var fog_shader = Shader.new()
-	fog_shader.code = "shader_type spatial; render_mode unshaded, cull_disabled, depth_draw_never; uniform sampler2D visibility_map: filter_linear; void fragment(){ vec4 fog=texture(visibility_map,UV); ALBEDO=vec3(.018,.038,.045); ALPHA=fog.a; }"
+	fog_shader.code = "shader_type spatial; render_mode unshaded, cull_disabled, depth_draw_never; uniform sampler2D visibility_map: filter_linear; uniform sampler2D explored_map: filter_linear; void fragment(){ float v=clamp(texture(visibility_map,UV).r*255.,0.,1.); float e=clamp(texture(explored_map,UV).r*255.,0.,1.); ALBEDO=vec3(.018,.038,.045); ALPHA=mix(.94,.6,e)*(1.-v); }"
 	fog_mat.shader = fog_shader
 	fog_mat.set_shader_parameter("visibility_map",fog_texture)
+	fog_mat.set_shader_parameter("explored_map",explored_texture)
 	fog.material_override = fog_mat
 	fog.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	terrain.add_child(fog)
 	fog_clock = 0
+	build_life()
+
+# Per-map birds, butterflies, fish and motes (ambient_life.gd). They are creatures, not terrain
+# scenery (their instance data are motion parameters, not poses), so they live beside the
+# terrain; the detail setting hides them with the decorative props. Eco draws fewer.
+func build_life():
+	if life: life.dispose()
+	var sun = -sunlight.global_transform.basis.z
+	var shift = Vector2(sun.x,sun.z)/maxf(0.2,-sun.y)
+	life = AmbientLife.new(self,sim.map_id,sim.nav.half,sim.nav.river,Catalog.rocks,life_budget,fog_texture,explored_texture,shift)
+	life.level = motion_level
+	life.root.visible = life_shown
+
+func set_life_shown(shown: bool):
+	life_shown = shown
+	if life: life.root.visible = shown
+
+func set_life_budget(budget: float):
+	if is_equal_approx(budget,life_budget): return
+	life_budget = budget
+	if is_instance_valid(decorative): build_life()
+
+# Frame-time governor hook (main.gd): 2 full, 1 calm, 0 still. Still also stops the water.
+func set_motion_level(level: int):
+	motion_level = level
+	if life: life.level = level
 
 func find_named(node: Node,hint: String):
 	if hint in node.name.to_lower(): return node
@@ -418,14 +457,16 @@ func refresh(dt: float):
 			else: o.root.queue_free()
 			objects.erase(id)
 	for r in sim.deposits: resource_objects[r.id].visible = r.amount > 0 and sim.discovered(r.p)
-	if water_material: water_material.set_shader_parameter("clock",sim.time if water_motion else 0.0)
+	if water_material and (motion_level > 0 or not water_motion): water_material.set_shader_parameter("clock",sim.time if water_motion else 0.0)
+	if life:
+		life.quiet = reduced_motion
+		life.update(dt,get_viewport().get_visible_rect().size.y/maxf(1.0,camera.size))
 	fog_clock -= dt
 	if fog_clock <= 0:
-		for y in range(sim.nav.grid_size):
-			for x in range(sim.nav.grid_size):
-				var index = y*sim.nav.grid_size+x
-				fog_image.set_pixel(x,y,Color(0,0,0,0.0 if sim.visible[0][index] else (0.6 if sim.explored[0][index] else 0.94)))
+		fog_image.set_data(sim.nav.grid_size,sim.nav.grid_size,false,Image.FORMAT_R8,sim.visible[0])
 		fog_texture.update(fog_image)
+		explored_image.set_data(sim.nav.grid_size,sim.nav.grid_size,false,Image.FORMAT_R8,sim.explored[0])
+		explored_texture.update(explored_image)
 		fog_clock = 0.25
 	for event in sim.events:
 		if not sim.seen(event.p): continue

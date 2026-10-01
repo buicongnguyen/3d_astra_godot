@@ -12,6 +12,8 @@ Choose **Training · start here** in the game-mode menu for eight guided lessons
 
 Soldiers and tanks can **Patrol (P)** between two points. Harvesters have an explicit **Attack (N)** command. See [Patrol and Harvester Attack](docs/PATROL_AND_ATTACK.md) for mouse, touch and order-queue behavior.
 
+Every map has its own small, cheap living details: birds circling with shadows on the ground, butterflies, dragonflies, fish in the rivers, and ash, dust, pollen, fireflies or embers. On slow devices a frame-time governor first calms, then stills them, to keep play smooth. See [living battlefields](docs/LIFE_AND_PERFORMANCE.md).
+
 Choose Meridian Riverlands or Ashen Frontier, customize army colors if desired, and deploy. Assign Harvesters to alloy and energy, build supply, train a mixed army, then destroy the enemy Command core.
 
 - Desktop: click/drag selection, right-click orders, WASD/arrows to pan, wheel or +/− to zoom. **B** opens construction; **Q E R T Y** activate displayed build/train actions; **F** attack-move, **M** withdraw, **X** stop; **H/J/K** cycle production buildings; **Home** focuses selection. **F1/F2/F3/F4** select idle Harvester/army/Harvesters/buildings. Ctrl+1–9 saves groups, Shift+1–9 adds, numbers recall. Open **Keys** or **?** for clickable commands and the [complete shortcut reference](docs/PC_SHORTCUTS.md).
@@ -38,6 +40,7 @@ Use the same version as CI for reproducibility. Godot uses the Compatibility ren
 & $env:GODOT --headless --path . --script res://tests/simulation_test.gd
 & $env:GODOT --headless --path . --script res://tests/progression_test.gd
 & $env:GODOT --headless --path . --script res://tests/assets_test.gd
+& $env:GODOT --headless --path . --script res://tests/life_test.gd
 & $env:GODOT --headless --path . --export-release Web
 & $env:GODOT --headless --path . --export-release Windows
 npm ci
