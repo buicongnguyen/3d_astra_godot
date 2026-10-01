@@ -50,10 +50,7 @@ try{
   await page.waitForFunction(()=>window.frontierState?.language==='vi',null,{timeout:90000}).catch(async error=>{
    await page.screenshot({path:'test-results/language-reload-'+(mobile?'mobile':'desktop')+'.png'}).catch(()=>{});
    const last=await page.evaluate(()=>window.frontierState?{ready:frontierState.ready,language:frontierState.language}:null).catch(()=>null);
-   throw new Error(`${error.message}
-state after reload: ${JSON.stringify(last)}
-console: ${logs.slice(-25).join('
-')}`);
+   throw new Error([error.message,'state after reload: '+JSON.stringify(last),'console:',...logs.slice(-25)].join(' | '));
   });
   await cmd({action:'start',manual_clock:true});
   await cmd({action:'activity_setup'});
