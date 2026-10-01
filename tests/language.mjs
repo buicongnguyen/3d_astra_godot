@@ -44,8 +44,17 @@ try{
     };
    });
   },null,{timeout:45000,polling:250});
+  const logs=[];page.on('console',m=>logs.push(m.type()+': '+m.text().slice(0,200)));
   await page.reload();
-  await page.waitForFunction(()=>window.frontierState?.language==='vi',null,{timeout:90000});
+  // On failure, report what the reloaded game logged and its last state.
+  await page.waitForFunction(()=>window.frontierState?.language==='vi',null,{timeout:90000}).catch(async error=>{
+   await page.screenshot({path:'test-results/language-reload-'+(mobile?'mobile':'desktop')+'.png'}).catch(()=>{});
+   const last=await page.evaluate(()=>window.frontierState?{ready:frontierState.ready,language:frontierState.language}:null).catch(()=>null);
+   throw new Error(`${error.message}
+state after reload: ${JSON.stringify(last)}
+console: ${logs.slice(-25).join('
+')}`);
+  });
   await cmd({action:'start',manual_clock:true});
   await cmd({action:'activity_setup'});
   let s=await state(),core=s.entities.find(e=>e.type==='hq'&&e.team===0);
