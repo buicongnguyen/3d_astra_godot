@@ -47,15 +47,31 @@ func _initialize():
 		check(moving and still and life.clock == held,id+" motion levels and reduced motion hold the clock")
 		life.dispose(); parent.free()
 	var g = Governor.new()
-	feed(g,20,1000.0/60.0); check(g.level == 2,"smooth frames keep full motion")
-	feed(g,20,1000.0/30.0); check(g.level == 2,"a steady 30 Hz cap is not slowness")
+	feed(g,20,1000.0/60.0); check(g.level == 3,"smooth frames keep full motion")
+	feed(g,20,1000.0/30.0); check(g.level == 3,"a steady 30 Hz cap is not slowness")
 	g = Governor.new(); feed(g,4,16)
 	feed(g,2.1,45); var calm = g.level
 	feed(g,2.1,45); var still_level = g.level
-	feed(g,30,16)
-	check(calm == 1 and still_level == 0 and g.level == 2,"slow frames calm then still the motion; smooth frames restore it")
+	feed(g,2.1,45); var rescue = g.level
+	feed(g,40,16)
+	check(calm == 2 and still_level == 1 and rescue == 0 and g.level == 3,"slow frames calm, still, then hide the life; smooth frames restore it")
 	g = Governor.new(); for i in range(50): g.sample(0.4,true)
 	for i in range(100): g.sample(0.05,false)
-	feed(g,2.9,50); check(g.level == 2,"hitches, pauses and the start-up grace are ignored")
+	feed(g,2.9,50); check(g.level == 3,"hitches, pauses and the start-up grace are ignored")
+	# Killing and thinning: a blast on a butterfly removes it from the drawn instances.
+	var holder = Node3D.new(); root.add_child(holder)
+	var tex = ImageTexture.create_from_image(Image.create(8,8,false,Image.FORMAT_R8))
+	var life = AmbientLife.new(holder,"riverlands",48.0,true,Catalog.rocks,1.0,tex,tex,Vector2(0.3,-0.3))
+	var flies = life.groups.filter(func(gr): return gr.name == "butterflies")[0]
+	var birds = life.groups.filter(func(gr): return gr.name == "birds")[0]
+	var total = life.alive_count(); var target = flies.rows[2]
+	var killed = life.disturb(target.x,target.z,1.0)
+	check(killed >= 1 and life.alive_count() == total-killed and flies.multi.visible_instance_count == flies.alive,"a blast kills the butterflies it reaches and they stop drawing")
+	check(flies.rows.find(target) >= flies.alive,"the dead butterfly moved past the live ones")
+	life.disturb(birds.rows[0].x,birds.rows[0].z,60.0)
+	check(birds.alive == birds.rows.size(),"birds fly above the battle")
+	life.set_share(0.5)
+	check(birds.multi.visible_instance_count == ceili(birds.alive*0.5) and birds.shadow.visible_instance_count == birds.multi.visible_instance_count,"the governor thins creatures and their shadows")
+	life.dispose(); holder.free()
 	print("LIFE: %d checks, %d failures" % [checks,failures])
 	quit(1 if failures else 0)

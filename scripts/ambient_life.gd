@@ -35,6 +35,12 @@ var clock = 0.0
 var level = 2
 var quiet = false
 var plan_data: Dictionary
+# Each family's live creatures sit first in its MultiMesh; `alive` of them are drawn (times
+# `share`), so creatures killed by combat or thinned by the governor cost nothing.
+var groups: Array = []
+var share = 1.0
+var half_size = 48.0
+var mote_look = ""
 
 # Pure, seeded placement: the same map always gets the same cast; tests check the bounds.
 static func plan(map_id: String, half: float, river: bool, rocks: Array, budget: float) -> Dictionary:
@@ -249,6 +255,7 @@ void fragment() { float d = length(POINT_COORD - vec2(0.5)); ALBEDO = tint; ALPH
 
 func _init(parent: Node3D, map_id: String, half: float, river: bool, rocks: Array, budget: float, visible_texture: Texture2D, explored_texture: Texture2D, sun_shift: Vector2):
 	root = Node3D.new(); root.name = "AmbientLife"; parent.add_child(root)
+	half_size = half
 	plan_data = plan(map_id, half, river, rocks, budget)
 	var p = plan_data
 	if not p.birds.is_empty():
@@ -261,23 +268,25 @@ func _init(parent: Node3D, map_id: String, half: float, river: bool, rocks: Arra
 		var shadows = family("bird-shadows", quad_mesh(), p.birds.map(func(b): return [Transform3D(Basis(Vector3(b.size, b.radius, b.speed), Vector3(b.phase, b.mode, b.flap), Vector3(b.soar, b.back, b.side)), Vector3(b.x, b.y, b.z)), Color.WHITE]),
 			shader(SHADOW_SHADER, half, visible_texture, explored_texture))
 		shadows.material_override.set_shader_parameter("sun_shift", sun_shift)
+		# Birds fly above the battle: never killed, only thinned. Shadows follow their birds.
+		groups.append({"name": "birds", "multi": birds.multimesh, "shadow": shadows.multimesh, "rows": p.birds.duplicate(), "alive": p.birds.size(), "at": Callable()})
 	for kind in ["butterflies", "dragonflies"]:
 		if p[kind].is_empty(): continue
 		var dragonfly = 1.0 if kind == "dragonflies" else 0.0
-		family(kind, flutter_mesh(dragonfly > 0.5), p[kind].map(func(f): return [Transform3D(Basis(Vector3(f.size, f.rx, f.rz), Vector3(f.speed, f.phase, dragonfly), Vector3(46.0 if dragonfly > 0.5 else 16.0, 0, 0)), Vector3(f.x, f.y, f.z)), Color(f.color)]),
+		var node = family(kind, flutter_mesh(dragonfly > 0.5), p[kind].map(func(f): return [Transform3D(Basis(Vector3(f.size, f.rx, f.rz), Vector3(f.speed, f.phase, dragonfly), Vector3(46.0 if dragonfly > 0.5 else 16.0, 0, 0)), Vector3(f.x, f.y, f.z)), Color(f.color)]),
 			shader(FLUTTER_SHADER, half, visible_texture, explored_texture))
+		groups.append({"name": kind, "multi": node.multimesh, "rows": p[kind].duplicate(), "alive": p[kind].size(), "at": func(f, _t): return Vector3(f.x, f.z, maxf(f.rx, f.rz))})
 	if not p.fish.is_empty():
-		family("fish", fish_mesh(), p.fish.map(func(f): return [Transform3D(Basis(Vector3(f.dir, f.speed, f.phase), Vector3(f.koi, 0, 0), Vector3.ZERO), Vector3(f.x, f.size, f.z)), Color.WHITE]),
+		var fish = family("fish", fish_mesh(), p.fish.map(func(f): return [Transform3D(Basis(Vector3(f.dir, f.speed, f.phase), Vector3(f.koi, 0, 0), Vector3.ZERO), Vector3(f.x, f.size, f.z)), Color.WHITE]),
 			shader(FISH_SHADER, half, visible_texture, explored_texture))
+		# Same path as FISH_SHADER, so a blast kills the fish that is actually there now.
+		var span = half*2.0-4.0
+		groups.append({"name": "fish", "multi": fish.multimesh, "rows": p.fish.duplicate(), "alive": p.fish.size(),
+			"at": func(f, t): return Vector3(fposmod(f.x+half-2.0+t*f.speed*f.dir, span)-span*0.5, f.z, 0.6)})
 	if not p.motes.is_empty():
-		var look = MOTES[p.mote_look]
-		var arrays = []; arrays.resize(Mesh.ARRAY_MAX)
-		var vertices = PackedVector3Array(); var data = PackedColorArray()
-		for m in p.motes:
-			vertices.append(Vector3(m.x, m.y, m.z)); data.append(Color(m.rate, m.phase, m.tone, m.size))
-		arrays[Mesh.ARRAY_VERTEX] = vertices; arrays[Mesh.ARRAY_COLOR] = data
-		var mesh = ArrayMesh.new(); mesh.add_surface_from_arrays(Mesh.PRIMITIVE_POINTS, arrays)
-		var node = MeshInstance3D.new(); node.name = "life_motes"; node.mesh = mesh
+		var look = MOTES[p.mote_look]; mote_look = p.mote_look
+		var node = MeshInstance3D.new(); node.name = "life_motes"; node.mesh = mote_mesh(p.motes, p.motes.size())
+		groups.append({"name": "motes", "node": node, "rows": p.motes.duplicate(), "alive": p.motes.size(), "at": func(m, _t): return Vector3(m.x, m.z, 1.5)})
 		var material = shader(MOTE_SHADER_HEAD % (", blend_add" if look.additive else "") + MOTE_SHADER, half, visible_texture, explored_texture)
 		material.set_shader_parameter("kind", float(look.kind))
 		material.set_shader_parameter("color_a", Color(look.colors[0])); material.set_shader_parameter("color_b", Color(look.colors[1]))
@@ -285,6 +294,53 @@ func _init(parent: Node3D, map_id: String, half: float, river: bool, rocks: Arra
 		node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		node.custom_aabb = AABB(Vector3(-half, -1, -half), Vector3(half*2, 20, half*2))
 		root.add_child(node); families.append(node)
+
+static func mote_mesh(rows: Array, count: int) -> ArrayMesh:
+	var arrays = []; arrays.resize(Mesh.ARRAY_MAX)
+	var vertices = PackedVector3Array(); var data = PackedColorArray()
+	for i in range(maxi(1, count)):
+		var m = rows[mini(i, rows.size()-1)]
+		vertices.append(Vector3(m.x, m.y if count > 0 else -100.0, m.z)); data.append(Color(m.rate, m.phase, m.tone, m.size if count > 0 else 0.0))
+	arrays[Mesh.ARRAY_VERTEX] = vertices; arrays[Mesh.ARRAY_COLOR] = data
+	var mesh = ArrayMesh.new(); mesh.add_surface_from_arrays(Mesh.PRIMITIVE_POINTS, arrays)
+	return mesh
+
+# Fraction of live creatures drawn: the governor thins them (and hides them at 0).
+func set_share(value: float):
+	share = value
+	for group in groups: apply_count(group)
+
+func apply_count(group: Dictionary):
+	var n = ceili(group.alive*share)
+	if group.has("multi"): group.multi.visible_instance_count = n
+	if group.has("shadow"): group.shadow.visible_instance_count = n
+	if group.has("node"): group.node.mesh = mote_mesh(group.rows, n)
+
+func alive_count() -> int:
+	var n = 0
+	for group in groups: n += group.alive
+	return n
+
+# Combat kills the small creatures it reaches (birds fly above it). A dead creature swaps
+# places with the last live one, and the draw shrinks by one.
+func disturb(x: float, z: float, radius: float) -> int:
+	var killed = 0
+	for group in groups:
+		if not group.at.is_valid(): continue
+		var before = group.alive
+		for i in range(group.alive-1, -1, -1):
+			var at: Vector3 = group.at.call(group.rows[i], clock)
+			if Vector2(at.x-x, at.y-z).length() > radius+at.z*0.5: continue
+			var last = group.alive-1
+			if group.has("multi"):
+				var multi: MultiMesh = group.multi
+				var t = multi.get_instance_transform(i); var c = multi.get_instance_custom_data(i)
+				multi.set_instance_transform(i, multi.get_instance_transform(last)); multi.set_instance_custom_data(i, multi.get_instance_custom_data(last))
+				multi.set_instance_transform(last, t); multi.set_instance_custom_data(last, c)
+			var row = group.rows[i]; group.rows[i] = group.rows[last]; group.rows[last] = row
+			group.alive -= 1; killed += 1
+		if group.alive != before: apply_count(group)
+	return killed
 
 func shader(code: String, half: float, visible_texture: Texture2D, explored_texture: Texture2D) -> ShaderMaterial:
 	var s = Shader.new(); s.code = code

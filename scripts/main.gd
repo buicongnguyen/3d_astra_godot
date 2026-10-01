@@ -156,7 +156,9 @@ document.getElementById('canvas').addEventListener('mousedown', event => {
 	view = WorldView.new()
 	add_child(view)
 	view.setup(sim)
-	governor.changed.connect(func(level): view.set_motion_level(level))
+	governor.changed.connect(func(level):
+		view.set_motion_level([0,0,1,2][level])
+		view.set_life_share([0.0,0.5,1.0,1.0][level]))
 	make_ui()
 	make_audio()
 	apply_settings()
@@ -1348,7 +1350,7 @@ func test_call(args):
 		"visual_fog": sim.visible[0].fill(0 if command.get("hidden",false) else 1)
 		"governor":
 			# Synthetic frame timings: {"seconds": s, "ms": frame time}; "reset" restarts the grace.
-			if command.get("reset",false): governor.reset(); governor.set_level(2)
+			if command.get("reset",false): governor.reset(); governor.set_level(3)
 			var ms = float(command.get("ms",16.0))
 			var t = 0.0
 			while t < float(command.get("seconds",0.0)) - 1e-6:
@@ -1464,7 +1466,7 @@ func publish_state():
 		return {"id":e.id,"screen":[point.x,point.y]}
 	)
 	state.draw_calls = Performance.get_monitor(Performance.RENDER_TOTAL_DRAW_CALLS_IN_FRAME)
-	state.life = {"families":view.life.families.map(func(n): return str(n.name).trim_prefix("life_")) if view.life else [],"level":view.motion_level,"clock":view.life.clock if view.life else 0.0,"governor":governor.level}
+	state.life = {"families":view.life.families.map(func(n): return str(n.name).trim_prefix("life_")) if view.life else [],"level":view.motion_level,"share":view.life_share,"alive":view.life.alive_count() if view.life else 0,"clock":view.life.clock if view.life else 0.0,"governor":governor.level}
 	state.activity = overlay.activity_snapshot
 	state.activity_effects = view.activity_effects.size()
 	state.activity_effect_lives = view.activity_effects.map(func(e): return e.life)

@@ -28,6 +28,7 @@ var life
 var life_budget = 1.0
 var life_shown = true
 var motion_level = 2
+var life_share = 1.0
 var reduced_motion = false
 # Unit and building parts draw through shared MultiMesh batches: the cloned parts keep their
 # animation and transforms but sit on render layer 2, which the camera skips. Each frame their
@@ -283,11 +284,18 @@ func build_life():
 	var shift = Vector2(sun.x,sun.z)/maxf(0.2,-sun.y)
 	life = AmbientLife.new(self,sim.map_id,sim.nav.half,sim.nav.river,Catalog.rocks,life_budget,fog_texture,explored_texture,shift)
 	life.level = motion_level
-	life.root.visible = life_shown
+	life.set_share(life_share)
+	life.root.visible = life_shown and life_share > 0
 
 func set_life_shown(shown: bool):
 	life_shown = shown
-	if life: life.root.visible = shown
+	if life: life.root.visible = shown and life_share > 0
+
+func set_life_share(value: float):
+	life_share = value
+	if life:
+		life.set_share(value)
+		life.root.visible = life_shown and value > 0
 
 func set_life_budget(budget: float):
 	if is_equal_approx(budget,life_budget): return
@@ -483,6 +491,9 @@ func refresh(dt: float):
 		explored_texture.update(explored_image)
 		fog_clock = 0.25
 	for event in sim.events:
+		# Blasts kill the small creatures they reach; a new match brings the full cast back.
+		if life and event.type in ["impact","death"]:
+			life.disturb(event.p.x,event.p.y,1.5 if event.type == "impact" else (6.0 if event.get("building",false) else (4.0 if event.get("heavy",false) else 2.5)))
 		if not sim.seen(event.p): continue
 		if event.type in ["impact","death"]:
 			var effect = event.duplicate()

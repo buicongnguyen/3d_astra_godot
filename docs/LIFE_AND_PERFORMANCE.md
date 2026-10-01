@@ -23,12 +23,16 @@ October 2026, ported from the Three.js edition (`github-io/docs/LIFE_AND_PERFORM
 - **Lighter on Eco.** Eco (the default on touch devices) draws 60% of the cast.
 - **Settings.** The detail setting hides the life, and reduced motion holds it still.
 
+## Creatures can be killed
+
+Impacts, deaths, wrecks and building collapses kill the butterflies, dragonflies, fish and motes they reach; birds survive. A killed creature swaps places with the last live one in its MultiMesh, and `visible_instance_count` shrinks, so it is no longer drawn. A new match rebuilds the full cast.
+
 ## Frame-time governor
 
 `scripts/governor.gd` judges each second of play:
 - **Slow:** the typical frame takes over 37 ms. A steady 30 Hz display cap does not count.
 - **Smooth:** 90% of frames finish under 19 ms.
-- **Stepping:** two slow seconds step cosmetic motion down (full → calm → still, where still also stops the water ripples), and eight smooth seconds step it back up.
+- **Stepping:** two slow seconds step down one level: full, calm, still (motion and water ripples stop, half the creatures hidden), then rescue (all creatures hidden), and eight smooth seconds step it back up.
 - **Ignored time:** hitches, pauses and the first 3 s of a match.
 - **In tests:** the governor stays off, and the `governor` test command feeds it synthetic timings.
 

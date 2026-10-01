@@ -30,7 +30,10 @@ try{
   await cmd({action:'governor',seconds:2.1,ms:45});assert.equal((await state()).life.level,1,'slow frames calm ambient life');
   await cmd({action:'governor',seconds:2.1,ms:45});let s=await state();assert.equal(s.life.level,0,'more slow frames hold it still');
   const held=s.life.clock;await page.waitForTimeout(500);assert.equal((await state()).life.clock,held,'still life does not move');
-  await cmd({action:'governor',seconds:30,ms:16});s=await state();assert.equal(s.life.level,2,'smooth frames restore full motion');
+  assert.equal(s.life.share,0.5,'still hides half the creatures');
+  await cmd({action:'governor',seconds:2.1,ms:45});assert.equal((await state()).life.share,0,'rescue hides them all');
+  await cmd({action:'governor',seconds:40,ms:16});s=await state();assert.equal(s.life.level,2,'smooth frames restore full motion');
+  assert.equal(s.life.share,1,'and every creature');
   assert.deepEqual(errors,[]);
   console.log('Godot ambient life passed: 7 maps, moving clock, governor full -> calm -> still -> full.');
 }finally{await browser.close();}
