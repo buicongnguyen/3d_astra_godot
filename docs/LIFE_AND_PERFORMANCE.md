@@ -45,3 +45,14 @@ The fog plane used to be rebuilt every 0.25 s with one `set_pixel` call per grid
   - motion levels and reduced motion hold the clock;
   - the governor handles 60 fps, a 30 Hz cap, slow frames, recovery and hitches.
 - `npm run test:life` (browser, CI group `visuals`) checks that all seven maps build their families with no shader errors in the exported game, that the clock moves, and that the governor goes full → calm → still → full.
+
+## Units drawn in batches
+
+`scripts/world_view.gd` draws unit and building parts through shared MultiMesh batches. The cloned parts keep their animation and transforms, but sit on render layer 2, which the camera skips and which casts no shadow. Each frame their global transforms are copied into one MultiMesh per mesh and material set; team colours are baked into a mesh copy per team. Picking uses each model's pick boxes, so it is unaffected.
+
+| Real WebGL draws at match start (Riverlands) | Before | After |
+|---|---|---|
+| Phone, Eco | 355 | 245 |
+| Desktop, shadows on | 665 | 445 |
+
+Before batching, each extra unit added several draws (more again with shadows). Now each kind of part costs one draw whatever the army size, so battles gain far more than the match start. About 90 of the remaining phone draws are the 2D interface.

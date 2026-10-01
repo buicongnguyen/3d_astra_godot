@@ -29,6 +29,13 @@ var life_budget = 1.0
 var life_shown = true
 var motion_level = 2
 var reduced_motion = false
+# Unit and building parts draw through shared MultiMesh batches: the cloned parts keep their
+# animation and transforms but sit on render layer 2, which the camera skips. Each frame their
+# global transforms are copied into one MultiMesh per mesh and material set, so a battle costs
+# one draw per part type instead of one per part per unit.
+const SOURCE_LAYER = 2
+var batches: Dictionary = {}
+var batch_root: Node3D
 var fog_clock = 0.0
 var water_material: ShaderMaterial
 var decorative: Node3D
@@ -100,6 +107,8 @@ func setup(simulation):
 	camera.far = 230
 	add_child(camera)
 	camera.make_current()
+	camera.cull_mask = camera.cull_mask & ~SOURCE_LAYER
+	batch_root = Node3D.new(); batch_root.name = "EntityBatches"; add_child(batch_root)
 	build_map()
 	update_camera()
 	ghost = MeshInstance3D.new()
@@ -355,6 +364,11 @@ func create_entity(e: Dictionary):
 			if clip != "Death": animation.get_animation(clip).loop_mode = Animation.LOOP_LINEAR
 	var boxes: Array = []
 	boxes = model.get_meta("pick_boxes",[])
+	var parts = model.find_children("*","MeshInstance3D",true,false)
+	for part in parts:
+		part.layers = SOURCE_LAYER
+		part.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	root.set_meta("parts",parts)
 	objects[e.id] = {"root":root,"model":model,"ring":ring,"legs":legs,"animation":animation,"clip":"","pick_boxes":boxes}
 	var barrels: Array = []
 	collect_barrels(model,barrels)
@@ -503,6 +517,44 @@ func refresh(dt: float):
 	while effects.size() > 64:
 		effects[0].node.queue_free()
 		effects.pop_front()
+	fill_batches()
+
+func batch_for(part: MeshInstance3D) -> Dictionary:
+	if part.has_meta("batch"): return part.get_meta("batch")
+	var key = str(part.mesh.get_instance_id())+"/"+str(part.material_override.get_instance_id() if part.material_override else 0)
+	for i in range(part.mesh.get_surface_count()):
+		var m = part.get_surface_override_material(i)
+		key += ":"+str(m.get_instance_id() if m else 0)
+	if not batches.has(key):
+		# A copy of the mesh carries the team's override materials, which MultiMesh cannot apply.
+		var mesh = part.mesh.duplicate()
+		for i in range(mesh.get_surface_count()):
+			var m = part.get_surface_override_material(i)
+			if m: mesh.surface_set_material(i,m)
+		var multi = MultiMesh.new(); multi.transform_format = MultiMesh.TRANSFORM_3D; multi.mesh = mesh
+		var node = MultiMeshInstance3D.new(); node.multimesh = multi
+		if part.material_override: node.material_override = part.material_override
+		batch_root.add_child(node)
+		batches[key] = {"node":node,"capacity":0,"transforms":[]}
+	part.set_meta("batch",batches[key])
+	return batches[key]
+
+func collect_parts(root: Node3D):
+	if not is_instance_valid(root) or not root.visible or not root.has_meta("parts"): return
+	for part in root.get_meta("parts"):
+		if is_instance_valid(part) and part.visible: batch_for(part).transforms.append(part.global_transform)
+
+func fill_batches():
+	for b in batches.values(): b.transforms.clear()
+	for o in objects.values(): collect_parts(o.root)
+	for effect in effects: collect_parts(effect.node)
+	for b in batches.values():
+		var multi: MultiMesh = b.node.multimesh; var n = b.transforms.size()
+		if n > b.capacity:
+			b.capacity = maxi(16,nearest_po2(n)); multi.instance_count = b.capacity
+		for i in range(n): multi.set_instance_transform(i,b.transforms[i])
+		multi.visible_instance_count = n
+		b.node.visible = n > 0
 
 func ground_texture() -> ImageTexture:
 	# Static colour texture: soft surface transitions and grain with no per-frame work.
